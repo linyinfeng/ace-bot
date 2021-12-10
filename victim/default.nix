@@ -89,7 +89,10 @@ in
       coreutils
     ];
 
-    environment."RUST_LOG" = "info";
+    environment = {
+      "MANAGER_CHAT_ID" = "148111617";
+      "RUST_LOG" = "info";
+    };
 
     wantedBy = [ "multi-user.target" ];
   };

@@ -11,3 +11,4 @@ tokio = { version = "*", features = [ "macros", "rt-multi-thread", "process" ] }
 log = "*"
 pretty_env_logger = "*"
 thiserror = "*"
+once_cell = "*"

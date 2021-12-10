@@ -1,7 +1,17 @@
-use std::{process::{Stdio, Output}, time::Duration};
-use tokio::{process::Command, io::AsyncWriteExt, time::timeout};
-
+use once_cell::sync::Lazy;
+use std::{
+    process::{Output, Stdio},
+    time::Duration,
+};
 use teloxide::{prelude::*, requests::ResponseResult, types::MediaKind};
+use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
+
+static MANAGER_CHAT_ID: Lazy<i64> = Lazy::new(|| {
+    std::env::var("MANAGER_CHAT_ID")
+        .expect("missing MANAGER_CHAT_ID")
+        .parse()
+        .expect("invalid MANAGER_CHAT_ID")
+});
 
 #[tokio::main]
 async fn main() {
@@ -17,47 +27,53 @@ async fn run() {
 
 async fn handle_update(cx: UpdateWithCx<AutoSend<Bot>, Message>) -> ResponseResult<()> {
     match &cx.update.kind {
-        teloxide::types::MessageKind::Common(message) => {
-            match &message.media_kind {
-                MediaKind::Text(text_media) => {
-                    log::info!("handle message: {:?}", cx.update);
-                    let raw_text = &text_media.text;
-                    let text = preprocessing(raw_text);
-                    log::info!("run command '{:?}'", text);
-                    match handle_command_timeout(&text).await {
-                        Err(e) => {
-                            e.report(&cx).await?;
-                        },
-                        Ok(output) => {
-                            log::info!("command '{:?}': output: {:?}", text, output);
-                            let mut text_output = String::new();
-                            text_output.push_str(&format!("{}", output.status));
-                            if !output.stdout.is_empty() {
-                                text_output.push_str(&format!("\n(stdout)\n{}", String::from_utf8_lossy(&output.stdout)));
-                            }
-                            if !output.stderr.is_empty() {
-                                text_output.push_str(&format!("\n(stderr)\n{}", String::from_utf8_lossy(&output.stderr)));
-                            }
-                            if text_output.len() >= 4000 {
-                                cx.reply_to("error: output message is too long").await?;
-                            } else {
-                                cx.reply_to(&text_output).await?;
-                            }
+        teloxide::types::MessageKind::Common(message) => match &message.media_kind {
+            MediaKind::Text(text_media) => {
+                log::info!("handle message: {:?}", cx.update);
+                let raw_text = &text_media.text;
+                let text = preprocessing(raw_text);
+                let command_log = format!("chat {} run command: {}", cx.chat_id(), text);
+                log::info!("{}", command_log);
+                cx.requester.send_message(*MANAGER_CHAT_ID, command_log).await?;
+                match handle_command_timeout(&text).await {
+                    Err(e) => {
+                        e.report(&cx).await?;
+                    }
+                    Ok(output) => {
+                        log::info!("command '{:?}': output: {:?}", text, output);
+                        let mut text_output = String::new();
+                        text_output.push_str(&format!("{}", output.status));
+                        if !output.stdout.is_empty() {
+                            text_output.push_str(&format!(
+                                "\n(stdout)\n{}",
+                                String::from_utf8_lossy(&output.stdout)
+                            ));
                         }
-                    };
+                        if !output.stderr.is_empty() {
+                            text_output.push_str(&format!(
+                                "\n(stderr)\n{}",
+                                String::from_utf8_lossy(&output.stderr)
+                            ));
+                        }
+                        if text_output.len() >= 4000 {
+                            cx.reply_to("error: output message is too long").await?;
+                        } else {
+                            cx.reply_to(&text_output).await?;
+                        }
+                    }
                 }
-                _ => log::info!("ignored update: {:?}", cx.update)
             }
+            _ => log::info!("ignored update: {:?}", cx.update),
         },
-        _ => log::info!("ignored update: {:?}", cx.update)
+        _ => log::info!("ignored update: {:?}", cx.update),
     }
     Ok(())
 }
 
 fn preprocessing(raw: &str) -> String {
     let mut text = raw.replace("—", "--");
-    if !text.ends_with("\n") {
-        text.push_str("\n");
+    if !text.ends_with('\n') {
+        text.push('\n');
     }
     text
 }
