@@ -30,7 +30,7 @@ in
   networking = {
     useDHCP = false; # disable deprecated option
     useNetworkd = true;
-    interfaces.ens3.useDHCP = true;
+    interfaces.enp1s0.useDHCP = true;
     firewall.enable = true;
   };
   services.openssh.enable = true;
