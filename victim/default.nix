@@ -45,12 +45,10 @@ in
   services.fail2ban.enable = true;
 
   users.users.root = {
-    passwordFile = config.sops.secrets.root-passwd.path;
     openssh.authorizedKeys.keyFiles = [
       ../public/id_ed25519.pub
     ];
   };
-  sops.secrets.root-passwd = { };
 
   environment.persistence."/persist" = {
     directories = [
