@@ -88,6 +88,7 @@ in
     path = with pkgs; [
       bash
       coreutils
+      procps
       curl
     ];
 
