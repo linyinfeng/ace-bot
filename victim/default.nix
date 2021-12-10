@@ -36,13 +36,15 @@ in
   services.openssh.enable = true;
   system.activationScripts = {
     setupHostKeys.text = ''
-      setting up /persist/etc/ssh...
+      echo "setting up /persist/etc/ssh..."
       mkdir -p /persist/etc/ssh
       ${pkgs.openssh}/bin/ssh-keygen -A -f /persist
     '';
     setupSecrets.deps = [ "setupHostKeys" ];
   };
   services.fail2ban.enable = true;
+
+  environment.defaultPackages = lib.mkForce [];
 
   users.users.root = {
     openssh.authorizedKeys.keyFiles = [
@@ -68,7 +70,7 @@ in
   ];
 
   systemd.services.ace-bot = {
-    enable = false;
+    # enable = false;
     script = ''
       export TELOXIDE_TOKEN=$(cat "$CREDENTIALS_DIRECTORY/token")
       ${pkgs.ace-bot}/bin/ace-bot
@@ -87,6 +89,8 @@ in
     wantedBy = [ "multi-user.target" ];
   };
   sops.secrets.ace-bot = { };
+
+  nix.allowedUsers = [ "root" ];
 
   fileSystems."/" =
     {

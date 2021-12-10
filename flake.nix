@@ -36,10 +36,14 @@
         ];
       };
 
-      deploy.nodes.victim.profiles.system = {
-        user = "root";
-        path = deploy-rs.lib.x86_64-linux.activate.nixos
-          self.nixosConfigurations.victim;
+      deploy.nodes.victim = {
+        hostname = "207.148.89.131";
+        profiles.system = {
+          sshUser = "root";
+          user = "root";
+          path = deploy-rs.lib.x86_64-linux.activate.nixos
+            self.nixosConfigurations.victim;
+        };
       };
 
       outputsBuilder = channels:
