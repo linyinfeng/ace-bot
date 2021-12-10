@@ -36,8 +36,8 @@ in
   services.openssh.enable = true;
   system.activationScripts = {
     setupHostKeys.text = ''
-      mkdir -p /nix/persist/etc/ssh
-      ssh-keygen -A -f /nix/persist/etc/ssh
+      mkdir -p /persist/etc/ssh
+      ssh-keygen -A -f /persist/etc/ssh
     '';
     setupSecrets.deps = [ "setupHostKeys" ];
   };
@@ -49,7 +49,7 @@ in
     ];
   };
 
-  environment.persistence."/nix/persist" = {
+  environment.persistence."/persist" = {
     directories = [
     ];
     files = [
