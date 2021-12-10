@@ -36,18 +36,21 @@ in
   services.openssh.enable = true;
   system.activationScripts = {
     setupHostKeys.text = ''
+      setting up /persist/etc/ssh...
       mkdir -p /persist/etc/ssh
-      ${pkgs.openssh}/bin/ssh-keygen -A -f /persist/
+      ${pkgs.openssh}/bin/ssh-keygen -A -f /persist
     '';
     setupSecrets.deps = [ "setupHostKeys" ];
   };
   services.fail2ban.enable = true;
 
   users.users.root = {
+    passwordFile = config.sops.secrets.root-passwd.path;
     openssh.authorizedKeys.keyFiles = [
       ../public/id_ed25519.pub
     ];
   };
+  sops.secrets.root-passwd = { };
 
   environment.persistence."/persist" = {
     directories = [
