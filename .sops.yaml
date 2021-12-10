@@ -1,0 +1,10 @@
+keys:
+  - &main   age10smz367wn4dfdq8ufgku5d7q7de9qvdzdn6h2d8szmta9hws7v2sup9r6p
+  # - &victim
+
+creation_rules:
+  - path_regex: secrets/[^/]+\.yaml$
+    key_groups:
+    - age:
+      - *main
+      # - *victim
