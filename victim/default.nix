@@ -37,7 +37,7 @@ in
   system.activationScripts = {
     setupHostKeys.text = ''
       mkdir -p /persist/etc/ssh
-      ssh-keygen -A -f /persist/etc/ssh
+      ${pkgs.openssh}/bin/ssh-keygen -A -f /persist/etc/ssh
     '';
     setupSecrets.deps = [ "setupHostKeys" ];
   };
