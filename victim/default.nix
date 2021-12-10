@@ -73,6 +73,7 @@ in
     # enable = false;
     script = ''
       export TELOXIDE_TOKEN=$(cat "$CREDENTIALS_DIRECTORY/token")
+      cd $RUNTIME_DIRECTORY
       ${pkgs.ace-bot}/bin/ace-bot
     '';
 
@@ -83,6 +84,7 @@ in
       ];
       Restart = "always";
       LimitNPROC = "100";
+      RuntimeDirectory = "ace-bot";
     };
 
     path = with pkgs; [
@@ -90,6 +92,10 @@ in
       coreutils
       procps
       curl
+      netcat.nc
+      vim
+      which
+      mount
     ];
 
     environment = {
@@ -100,6 +106,13 @@ in
     wantedBy = [ "multi-user.target" ];
   };
   sops.secrets.ace-bot = { };
+
+  security.auditd.enable = true;
+  security.audit.enable = true;
+  security.audit.rules = [
+    # log all commands executed
+    "-a exit,always -F arch=b64 -S execve"
+  ];
 
   nix.allowedUsers = [ "root" ];
 

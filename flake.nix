@@ -9,12 +9,9 @@
     impermanence.url = "github:nix-community/impermanence";
     sops-nix.url = "github:mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
-    deploy-rs.url = "github:serokell/deploy-rs";
-    deploy-rs.inputs.nixpkgs.follows = "nixpkgs";
-    deploy-rs.inputs.utils.follows = "flake-utils-plus/flake-utils";
   };
   outputs =
-    inputs@{ self, nixpkgs, flake-utils-plus, impermanence, sops-nix, deploy-rs }:
+    inputs@{ self, nixpkgs, flake-utils-plus, impermanence, sops-nix }:
     let utils = flake-utils-plus.lib;
     in
     utils.mkFlake {
@@ -34,16 +31,6 @@
           impermanence.nixosModules.impermanence
           sops-nix.nixosModules.sops
         ];
-      };
-
-      deploy.nodes.victim = {
-        hostname = "207.148.89.131";
-        profiles.system = {
-          sshUser = "root";
-          user = "root";
-          path = deploy-rs.lib.x86_64-linux.activate.nixos
-            self.nixosConfigurations.victim;
-        };
       };
 
       outputsBuilder = channels:
