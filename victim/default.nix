@@ -34,6 +34,13 @@ in
     firewall.enable = true;
   };
   services.openssh.enable = true;
+  system.activationScripts = {
+    setupHostKeys.text = ''
+      mkdir -p /nix/persist/etc/ssh
+      ssh-keygen -A -f /nix/persist/etc/ssh
+    '';
+    setupSecrets.deps = [ "setupHostKeys" ];
+  };
   services.fail2ban.enable = true;
 
   users.users.root = {
