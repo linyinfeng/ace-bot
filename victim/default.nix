@@ -28,6 +28,7 @@ in
   boot.initrd.availableKernelModules = [ "ata_piix" "uhci_hcd" "virtio_pci" "sr_mod" "virtio_blk" ];
 
   networking = {
+    useDHCP = false; # disable deprecated option
     useNetworkd = true;
     interfaces.ens3.useDHCP = true;
     firewall.enable = true;
