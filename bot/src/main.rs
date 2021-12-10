@@ -33,10 +33,10 @@ async fn handle_update(cx: UpdateWithCx<AutoSend<Bot>, Message>) -> ResponseResu
                             let mut text_output = String::new();
                             text_output.push_str(&format!("{}", output.status));
                             if !output.stdout.is_empty() {
-                                text_output.push_str(&format!("(stdout)\n{}", String::from_utf8_lossy(&output.stdout)));
+                                text_output.push_str(&format!("\n(stdout)\n{}", String::from_utf8_lossy(&output.stdout)));
                             }
                             if !output.stderr.is_empty() {
-                                text_output.push_str(&format!("(stderr)\n{}", String::from_utf8_lossy(&output.stderr)));
+                                text_output.push_str(&format!("\n(stderr)\n{}", String::from_utf8_lossy(&output.stderr)));
                             }
                             if text_output.len() >= 4000 {
                                 cx.reply_to("error: output message is too long").await?;

@@ -5,6 +5,9 @@ pkgs.mkShell {
     rustup
     rust-analyzer
 
+    pkg-config
+    openssl
+
     sops
     ssh-to-age
   ];

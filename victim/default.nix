@@ -84,6 +84,11 @@ in
       Restart = "always";
     };
 
+    path = with pkgs; [
+      bash
+      coreutils
+    ];
+
     environment."RUST_LOG" = "info";
 
     wantedBy = [ "multi-user.target" ];
@@ -96,16 +101,17 @@ in
     {
       device = "tmpfs";
       fsType = "tmpfs";
-      options = [ "defaults" "size=2G" "mode=755" ];
+      options = [ "defaults" "size=2G" "mode=755" "noexec" ];
     };
-  fileSystems."/persist" = btrfsSubvolMain "@persist" { neededForBoot = true; };
-  fileSystems."/var/log" = btrfsSubvolMain "@var-log" { neededForBoot = true; };
+  fileSystems."/persist" = btrfsSubvolMain "@persist" { neededForBoot = true; options = [ "noexec" ]; };
+  fileSystems."/var/log" = btrfsSubvolMain "@var-log" { neededForBoot = true; options = [ "noexec" ]; };
   fileSystems."/nix" = btrfsSubvolMain "@nix" { neededForBoot = true; };
-  fileSystems."/swap" = btrfsSubvolMain "@swap" { };
+  fileSystems."/swap" = btrfsSubvolMain "@swap" { options = [ "noexec" ]; };
   fileSystems."/boot" =
     {
       device = "/dev/disk/by-uuid/4a186796-5865-4b47-985c-9354adec09a4";
       fsType = "ext4";
+      options = [ "noexec" ];
     };
   swapDevices =
     [{
