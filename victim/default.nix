@@ -82,11 +82,13 @@ in
         "token:${config.sops.secrets.ace-bot.path}"
       ];
       Restart = "always";
+      LimitNPROC = "100";
     };
 
     path = with pkgs; [
       bash
       coreutils
+      curl
     ];
 
     environment = {

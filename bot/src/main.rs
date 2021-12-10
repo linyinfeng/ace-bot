@@ -5,7 +5,9 @@ use std::{
 };
 use teloxide::{prelude::*, requests::ResponseResult, types::MediaKind};
 use teloxide::types::User;
-use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
+use tokio::{io::AsyncWriteExt, process::Command};
+use tokio::select;
+use tokio::time::sleep;
 
 static MANAGER_CHAT_ID: Lazy<i64> = Lazy::new(|| {
     std::env::var("MANAGER_CHAT_ID")
@@ -36,7 +38,7 @@ async fn handle_update(cx: UpdateWithCx<AutoSend<Bot>, Message>) -> ResponseResu
                     let text = preprocessing(raw_text);
                     log::info!("{:?}: {}", user, text);
                     log_for_manager(&cx.requester, &user, &text).await?;
-                    match handle_command_timeout(&text).await {
+                    match handle_command(&text).await {
                         Err(e) => {
                             e.report(&cx).await?;
                         }
@@ -90,29 +92,36 @@ fn preprocessing(raw: &str) -> String {
     text
 }
 
-async fn handle_command_timeout(text: &str) -> Result<Output, AceError> {
-    timeout(Duration::from_secs(10), handle_command(text)).await?
-}
-
 async fn handle_command(text: &str) -> Result<Output, AceError> {
+    let timeout = sleep(Duration::from_secs(10));
+
     let mut child = Command::new("bash")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .spawn()?;
 
     let mut stdin = child.stdin.take().unwrap();
     stdin.write_all(text.as_bytes()).await?;
     drop(stdin);
 
-    let output = child.wait_with_output().await?;
-    Ok(output)
+    select! {
+        _ = child.wait() => {
+            let output = child.wait_with_output().await?;
+            return Ok(output)
+        }
+        _ = timeout => {
+            child.kill().await.expect("failed to kill, just abort");
+            return Err(AceError::Timeout)
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum AceError {
-    #[error("timeout: {0}")]
-    Timeout(#[from] tokio::time::error::Elapsed),
+    #[error("timeout: 10s elapsed")]
+    Timeout,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
