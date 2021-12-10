@@ -39,10 +39,11 @@
       };
 
       outputsBuilder = channels:
-      let pkgs = channels.nixpkgs;
-      in {
-        packages.bot = pkgs.callPackage ./bot.nix { };
-        devShell = pkgs.callPackage ./shell.nix { };
-      };
+        let pkgs = channels.nixpkgs;
+        in
+        {
+          packages.bot = pkgs.callPackage ./bot.nix { };
+          devShell = pkgs.callPackage ./shell.nix { };
+        };
     };
 }

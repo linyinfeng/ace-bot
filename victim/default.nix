@@ -27,15 +27,19 @@ in
   };
   boot.initrd.availableKernelModules = [ "ata_piix" "uhci_hcd" "virtio_pci" "sr_mod" "virtio_blk" ];
 
-  networking.firewall.enable = true;
+  networking = {
+    useNetworkd = true;
+    interfaces.ens3.useDHCP = true;
+    firewall.enable = true;
+  };
   services.openssh.enable = true;
   services.fail2ban.enable = true;
 
-   users.users.root = {
+  users.users.root = {
     openssh.authorizedKeys.keyFiles = [
       ../public/id_ed25519.pub
     ];
-   };
+  };
 
   environment.persistence."/nix/persist" = {
     directories = [
