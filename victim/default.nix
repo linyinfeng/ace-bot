@@ -36,7 +36,7 @@ in
   services.openssh.enable = true;
   services.fail2ban.enable = true;
 
-  environment.defaultPackages = lib.mkForce [];
+  environment.defaultPackages = lib.mkForce [ ];
 
   users.users.root = {
     openssh.authorizedKeys.keyFiles = [

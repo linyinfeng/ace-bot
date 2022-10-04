@@ -36,8 +36,9 @@
         self.nixosConfigurations.victim.config.system.build.toplevel;
 
       outputsBuilder = channels:
-        let pkgs = channels.nixpkgs;
-            system = pkgs.stdenv.hostPlatform.system;
+        let
+          pkgs = channels.nixpkgs;
+          system = pkgs.stdenv.hostPlatform.system;
         in
         {
           packages.bot = pkgs.callPackage ./bot.nix { };
