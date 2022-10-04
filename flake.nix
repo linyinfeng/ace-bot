@@ -6,9 +6,6 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils-plus.url = "github:gytis-ivaskevicius/flake-utils-plus";
-    impermanence.url = "github:nix-community/impermanence";
-    sops-nix.url = "github:mic92/sops-nix";
-    sops-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
   outputs =
     inputs@{ self, nixpkgs, flake-utils-plus, impermanence, sops-nix }:
@@ -22,22 +19,14 @@
           ace-bot = final.callPackage ./bot.nix { };
         })
       ];
-      hostDefaults.channelName = "nixpkgs";
 
-      hosts.victim = {
-        system = "x86_64-linux";
-        modules = [
-          ./victim
-          impermanence.nixosModules.impermanence
-          sops-nix.nixosModules.sops
-        ];
-      };
+      nixosModules.ace-bot = ./modules/services/ace-bot.nix;
 
       outputsBuilder = channels:
         let pkgs = channels.nixpkgs;
         in
         {
-          packages.bot = pkgs.callPackage ./bot.nix { };
+          packages.ace-bot = pkgs.callPackage ./bot.nix { };
           devShell = pkgs.callPackage ./shell.nix { };
         };
     };
