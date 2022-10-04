@@ -32,13 +32,17 @@
           sops-nix.nixosModules.sops
         ];
       };
+      checks.x86_64-linux.victim-toplevel =
+        self.nixosConfigurations.victim.config.system.build.toplevel;
 
       outputsBuilder = channels:
         let pkgs = channels.nixpkgs;
+            system = pkgs.stdenv.hostPlatform.system;
         in
         {
           packages.bot = pkgs.callPackage ./bot.nix { };
           devShell = pkgs.callPackage ./shell.nix { };
+          checks = self.packages.${system};
         };
     };
 }

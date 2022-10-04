@@ -106,7 +106,7 @@ in
     "-a exit,always -F arch=b64 -S execve"
   ];
 
-  nix.allowedUsers = [ "root" ];
+  nix.settings.trusted-users = [ "root" "@wheel" ];
 
   fileSystems."/" =
     {
@@ -128,4 +128,6 @@ in
     [{
       device = "/swap/swapfile";
     }];
+
+  system.stateVersion = "22.05";
 }
