@@ -1,6 +1,6 @@
 keys:
   - &main   7D2F4C6B9A8300CCDDB641FDDF14B55A7A29C30F
-  - &victim age1va3vhgwpxdhw6wm6zzc2age5wc7k63f0f86z60h36ewa0e9qlcwscvw0ld
+  - &victim age1ndhan47vrgs736m0xgnj2tv5r242annemkugvxf7tkd87wlgvsvqzhqdd9
 
 creation_rules:
   - path_regex: secrets/[^/]+\.yaml$
