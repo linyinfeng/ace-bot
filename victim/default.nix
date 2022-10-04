@@ -34,14 +34,6 @@ in
     firewall.enable = true;
   };
   services.openssh.enable = true;
-  system.activationScripts = {
-    setupHostKeys.text = ''
-      echo "setting up /persist/etc/ssh..."
-      mkdir -p /persist/etc/ssh
-      ${pkgs.openssh}/bin/ssh-keygen -A -f /persist
-    '';
-    setupSecrets.deps = [ "setupHostKeys" ];
-  };
   services.fail2ban.enable = true;
 
   environment.defaultPackages = lib.mkForce [];
@@ -128,8 +120,8 @@ in
   fileSystems."/swap" = btrfsSubvolMain "@swap" { options = [ "noexec" ]; };
   fileSystems."/boot" =
     {
-      device = "/dev/disk/by-uuid/4a186796-5865-4b47-985c-9354adec09a4";
-      fsType = "ext4";
+      device = "/dev/disk/by-uuid/5C56-7693";
+      fsType = "vfat";
       options = [ "noexec" ];
     };
   swapDevices =
