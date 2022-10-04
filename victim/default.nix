@@ -70,9 +70,9 @@ in
   ];
 
   systemd.services.ace-bot = {
-    # enable = false;
     script = ''
       export TELOXIDE_TOKEN=$(cat "$CREDENTIALS_DIRECTORY/token")
+      rm "$CREDENTIALS_DIRECTORY/token"
       cd $RUNTIME_DIRECTORY
       ${pkgs.ace-bot}/bin/ace-bot
     '';
