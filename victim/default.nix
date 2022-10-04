@@ -36,7 +36,9 @@ in
   services.openssh.enable = true;
   services.fail2ban.enable = true;
 
-  environment.defaultPackages = lib.mkForce [ ];
+  environment.systemPackages = with pkgs; [
+    screenfetch
+  ];
 
   users.users.root = {
     openssh.authorizedKeys.keyFiles = [
@@ -69,11 +71,13 @@ in
       chmod 400 "$RUNTIME_DIRECTORY/token"
     '';
     script = ''
-      cd $RUNTIME_DIRECTORY
       echo "read ace-bot token"
-      export TELOXIDE_TOKEN=$(cat token)
+      export TELOXIDE_TOKEN=$(cat "$RUNTIME_DIRECTORY/token")
       echo "clear ace-bot token"
-      rm token
+      rm "$RUNTIME_DIRECTORY/token"
+
+      cd "$STATE_DIRECTORY"
+      export HOME="$STATE_DIRECTORY"
       ${pkgs.ace-bot}/bin/ace-bot
     '';
 
@@ -83,18 +87,13 @@ in
       Restart = "always";
       LimitNPROC = "100";
       RuntimeDirectory = "ace-bot";
-      SupplementaryGroups = [ "nix-allowed" ];
+      StateDirectory = "ace-bot";
     };
 
     path = with pkgs; [
       bash
-      mount
-      coreutils
-      procps
-      curl
-      netcat.nc
-      vim
-      which
+      "/run/wrappers"
+      "/run/current-system/sw"
     ];
 
     environment = {
@@ -115,7 +114,6 @@ in
   ];
 
   nix.settings.trusted-users = [ "root" "@wheel" ];
-  nix.settings.allowed-users = [ "@nix-allowed" ];
 
   fileSystems."/" =
     {
@@ -125,6 +123,9 @@ in
     };
   fileSystems."/persist" = btrfsSubvolMain "@persist" { neededForBoot = true; options = [ "noexec" ]; };
   fileSystems."/var/log" = btrfsSubvolMain "@var-log" { neededForBoot = true; options = [ "noexec" ]; };
+  fileSystems."/var/lib/private/ace-bot" = btrfsSubvolMain "@ace-bot" {
+    options = [ ]; # allow exec
+  };
   fileSystems."/nix" = btrfsSubvolMain "@nix" { neededForBoot = true; };
   fileSystems."/swap" = btrfsSubvolMain "@swap" { options = [ "noexec" ]; };
   fileSystems."/boot" =
