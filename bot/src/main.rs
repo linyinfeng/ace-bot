@@ -96,7 +96,8 @@ async fn handle_command(text: &str) -> Result<Output, AceError> {
     let timeout = sleep(Duration::from_secs(10));
 
     let mut child = Command::new("bash")
-        .env_clear() // clear TELOXIDE_*
+        .env_remove("TELOXIDE_TOKEN")
+        .env_remove("TELOXIDE_REMOVE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

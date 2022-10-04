@@ -62,32 +62,39 @@ in
   ];
 
   systemd.services.ace-bot = {
+    preStart = ''
+      echo "setup ace-bot token"
+      cp "${config.sops.secrets.ace-bot.path}" "$RUNTIME_DIRECTORY/token"
+      chown ace-bot:root "$RUNTIME_DIRECTORY/token"
+      chmod 400 "$RUNTIME_DIRECTORY/token"
+    '';
     script = ''
-      export TELOXIDE_TOKEN=$(cat "$CREDENTIALS_DIRECTORY/token")
-      rm "$CREDENTIALS_DIRECTORY/token"
       cd $RUNTIME_DIRECTORY
+      echo "read ace-bot token"
+      export TELOXIDE_TOKEN=$(cat token)
+      echo "clear ace-bot token"
+      rm token
       ${pkgs.ace-bot}/bin/ace-bot
     '';
 
     serviceConfig = {
       DynamicUser = true;
-      LoadCredential = [
-        "token:${config.sops.secrets.ace-bot.path}"
-      ];
+      PermissionsStartOnly = true;
       Restart = "always";
       LimitNPROC = "100";
       RuntimeDirectory = "ace-bot";
+      SupplementaryGroups = [ "nix-allowed" ];
     };
 
     path = with pkgs; [
       bash
+      mount
       coreutils
       procps
       curl
       netcat.nc
       vim
       which
-      mount
     ];
 
     environment = {
@@ -98,6 +105,7 @@ in
     wantedBy = [ "multi-user.target" ];
   };
   sops.secrets.ace-bot = { };
+  users.groups.nix-allowed = { };
 
   security.auditd.enable = true;
   security.audit.enable = true;
@@ -107,6 +115,7 @@ in
   ];
 
   nix.settings.trusted-users = [ "root" "@wheel" ];
+  nix.settings.allowed-users = [ "@nix-allowed" ];
 
   fileSystems."/" =
     {
