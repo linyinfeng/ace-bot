@@ -10,12 +10,19 @@
   networking.useDHCP = false;
 
   systemd.services.ace-bot = {
+    preStart = ''
+      echo "setup ace-bot token"
+      cp /secrets/ace-bot-token "$RUNTIME_DIRECTORY/token"
+      chown ace-bot:root "$RUNTIME_DIRECTORY/token"
+      chmod 400 "$RUNTIME_DIRECTORY/token"
+    '';
     script = ''
       echo "read ace-bot token"
-      export TELOXIDE_TOKEN=$(cat "$CREDENTIALS_DIRECTORY/token")
+      export TELOXIDE_TOKEN=$(cat "$RUNTIME_DIRECTORY/token")
       echo "clear ace-bot token"
-      rm "$CREDENTIALS_DIRECTORY/token"
+      rm "$RUNTIME_DIRECTORY/token"
 
+      export HOME="$PWD"
       ${pkgs.ace-bot}/bin/ace-bot
     '';
 
@@ -25,6 +32,7 @@
       PermissionsStartOnly = true;
 
       StateDirectory = "ace-bot";
+      RuntimeDirectory = "ace-bot";
       WorkingDirectory = "/var/lib/ace-bot";
 
       LoadCredential = [
