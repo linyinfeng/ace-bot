@@ -136,7 +136,7 @@ fn preprocessing(raw: &str) -> String {
 }
 
 async fn handle_command(text: &str) -> Result<Output, AceError> {
-    let timeout = sleep(Duration::from_secs(10));
+    let timeout = sleep(Duration::from_secs(60));
 
     let mut child = tokio::process::Command::new("bash")
         .env_remove("TELOXIDE_TOKEN")
