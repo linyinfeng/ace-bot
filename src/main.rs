@@ -5,6 +5,7 @@ use std::{
     process::{Output, Stdio},
     time::Duration,
 };
+use teloxide::types::InputFile;
 use teloxide::types::{ParseMode, Recipient, User};
 use teloxide::{
     prelude::*,
@@ -81,12 +82,10 @@ async fn handle_update(message: Message, bot: Bot) -> ResponseResult<()> {
                                 ));
                             }
                             if output_message.len() >= 4000 {
-                                bot.send_message(
-                                    message.chat.id,
-                                    "error: output message is too long",
-                                )
-                                .reply_to_message_id(message.id)
-                                .await?;
+                                let document = InputFile::memory(output_message);
+                                bot.send_document(message.chat.id, document)
+                                    .reply_to_message_id(message.id)
+                                    .await?;
                             } else {
                                 bot.send_message(message.chat.id, output_message)
                                     .reply_to_message_id(message.id)
