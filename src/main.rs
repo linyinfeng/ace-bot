@@ -1,4 +1,6 @@
 use once_cell::sync::Lazy;
+use regex::Regex;
+use regex::RegexBuilder;
 use std::{
     process::{Output, Stdio},
     time::Duration,
@@ -10,15 +12,19 @@ use teloxide::{
     types::{MediaKind, MessageKind},
     utils,
 };
+use tokio::io::AsyncWriteExt;
 use tokio::select;
 use tokio::time::sleep;
-use tokio::{io::AsyncWriteExt, process::Command};
 
-static MANAGER_CHAT_ID: Lazy<i64> = Lazy::new(|| {
-    std::env::var("MANAGER_CHAT_ID")
-        .expect("missing MANAGER_CHAT_ID")
-        .parse()
-        .expect("invalid MANAGER_CHAT_ID")
+static MANAGER_CHAT_ID: Lazy<Option<i64>> = Lazy::new(|| match std::env::var("MANAGER_CHAT_ID") {
+    Ok(s) => s.parse().ok(),
+    Err(_) => None,
+});
+static BOT_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    RegexBuilder::new("^(/bash@[a-zA-Z_]+|/bash)[[:space:]]+(.*)$")
+        .dot_matches_new_line(true)
+        .build()
+        .unwrap()
 });
 
 #[tokio::main]
@@ -29,46 +35,58 @@ async fn main() {
 async fn run() {
     pretty_env_logger::init();
     log::info!("Starting ace-bot...");
-    let bot = Bot::from_env().auto_send();
+    let bot = Bot::from_env();
     teloxide::repl(bot, handle_update).await;
 }
 
-async fn handle_update(message: Message, bot: AutoSend<Bot>) -> ResponseResult<()> {
+async fn handle_update(message: Message, bot: Bot) -> ResponseResult<()> {
     match &message.kind {
         MessageKind::Common(common_msg) => match &common_msg.media_kind {
             MediaKind::Text(text_media) => match &common_msg.from {
                 Some(user) => {
-                    log::info!("handle message: {:?}", message);
                     let raw_text = &text_media.text;
-                    let text = preprocessing(raw_text);
-                    log::info!("{:?}: {}", user, text);
-                    log_for_manager(&bot, &user, &text).await?;
-                    match handle_command(&text).await {
+                    log::info!("{:?} raw: {}", user, raw_text);
+                    let cleaned = match BOT_COMMAND_PATTERN.captures(&raw_text) {
+                        Some(c) => c[2].to_string(),
+                        None => raw_text.to_string(),
+                    };
+                    let bash_command = preprocessing(&cleaned);
+
+                    log::info!("{:?}: {}", user, bash_command);
+                    log_for_manager(&bot, &user, &bash_command).await?;
+                    match handle_command(&bash_command).await {
                         Err(e) => {
                             e.report(&message, &bot).await?;
                         }
                         Ok(output) => {
-                            log::info!("command '{:?}': output: {:?}", text, output);
+                            log::info!("command '{:?}': output: {:?}", bash_command, output);
                             let mut output_message = String::new();
                             output_message.push_str(&format!("{}", output.status));
                             if !output.stdout.is_empty() {
                                 output_message.push_str(&format!(
                                     "\n{}\n{}",
                                     utils::markdown::escape("(stdout)"),
-                                    utils::markdown::code_block(&String::from_utf8_lossy(&output.stdout))
+                                    utils::markdown::code_block(&String::from_utf8_lossy(
+                                        &output.stdout
+                                    ))
                                 ));
                             }
                             if !output.stderr.is_empty() {
                                 output_message.push_str(&format!(
                                     "\n{}\n{}",
                                     utils::markdown::escape("(stderr)"),
-                                    utils::markdown::code_block(&String::from_utf8_lossy(&output.stderr))
+                                    utils::markdown::code_block(&String::from_utf8_lossy(
+                                        &output.stderr
+                                    ))
                                 ));
                             }
                             if output_message.len() >= 4000 {
-                                bot.send_message(message.chat.id, "error: output message is too long")
-                                    .reply_to_message_id(message.id)
-                                    .await?;
+                                bot.send_message(
+                                    message.chat.id,
+                                    "error: output message is too long",
+                                )
+                                .reply_to_message_id(message.id)
+                                .await?;
                             } else {
                                 bot.send_message(message.chat.id, output_message)
                                     .reply_to_message_id(message.id)
@@ -87,15 +105,19 @@ async fn handle_update(message: Message, bot: AutoSend<Bot>) -> ResponseResult<(
     Ok(())
 }
 
-async fn log_for_manager(bot: &AutoSend<Bot>, user: &User, text: &str) -> ResponseResult<()> {
+async fn log_for_manager(bot: &Bot, user: &User, text: &str) -> ResponseResult<()> {
+    let manager_id = match *MANAGER_CHAT_ID {
+        Some(id) => id,
+        None => return Ok(()),
+    };
     let last_name = match &user.last_name {
-        Some(l) => format!(" {}", l),
+        Some(l) => format!("{}", l),
         None => String::new(),
     };
     bot.send_message(
-        Recipient::Id(ChatId(*MANAGER_CHAT_ID)),
+        Recipient::Id(ChatId(manager_id)),
         format!(
-            "{}{}:\n{}",
+            "{} {}:\n{}",
             utils::markdown::escape(&user.first_name),
             utils::markdown::escape(&last_name),
             utils::markdown::code_block(text)
@@ -115,11 +137,11 @@ fn preprocessing(raw: &str) -> String {
 }
 
 async fn handle_command(text: &str) -> Result<Output, AceError> {
+    log::error!("{text}");
     let timeout = sleep(Duration::from_secs(10));
 
-    let mut child = Command::new("bash")
+    let mut child = tokio::process::Command::new("bash")
         .env_remove("TELOXIDE_TOKEN")
-        .env_remove("TELOXIDE_REMOVE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -151,11 +173,7 @@ pub enum AceError {
 }
 
 impl AceError {
-    pub async fn report(
-        &self,
-        msg: &Message,
-        bot: &AutoSend<Bot>,
-    ) -> Result<(), teloxide::RequestError> {
+    pub async fn report(&self, msg: &Message, bot: &Bot) -> Result<(), teloxide::RequestError> {
         log::warn!("report error to chat {}: {:?}", msg.chat.id, self);
         bot.send_message(msg.chat.id, format!("{}", self))
             .reply_to_message_id(msg.id)
