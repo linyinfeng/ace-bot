@@ -164,7 +164,7 @@ async fn handle_command(text: &str) -> Result<Output, AceError> {
 
 #[derive(thiserror::Error, Debug)]
 pub enum AceError {
-    #[error("timeout: 10s elapsed")]
+    #[error("timeout reached")]
     Timeout,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
