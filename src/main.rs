@@ -46,14 +46,14 @@ async fn handle_update(message: Message, bot: Bot) -> ResponseResult<()> {
                 Some(user) => {
                     let raw_text = &text_media.text;
                     log::info!("{:?} raw: {}", user, raw_text);
-                    let cleaned = match BOT_COMMAND_PATTERN.captures(&raw_text) {
+                    let cleaned = match BOT_COMMAND_PATTERN.captures(raw_text) {
                         Some(c) => c[2].to_string(),
                         None => raw_text.to_string(),
                     };
                     let bash_command = preprocessing(&cleaned);
 
                     log::info!("{:?}: {}", user, bash_command);
-                    log_for_manager(&bot, &user, &bash_command).await?;
+                    log_for_manager(&bot, user, &bash_command).await?;
                     match handle_command(&bash_command).await {
                         Err(e) => {
                             e.report(&message, &bot).await?;
@@ -111,7 +111,7 @@ async fn log_for_manager(bot: &Bot, user: &User, text: &str) -> ResponseResult<(
         None => return Ok(()),
     };
     let last_name = match &user.last_name {
-        Some(l) => format!("{}", l),
+        Some(l) => l.to_string(),
         None => String::new(),
     };
     bot.send_message(
@@ -129,7 +129,7 @@ async fn log_for_manager(bot: &Bot, user: &User, text: &str) -> ResponseResult<(
 }
 
 fn preprocessing(raw: &str) -> String {
-    let mut text = raw.replace("—", "--");
+    let mut text = raw.replace('—', "--");
     if !text.ends_with('\n') {
         text.push('\n');
     }
@@ -155,11 +155,11 @@ async fn handle_command(text: &str) -> Result<Output, AceError> {
     select! {
         _ = child.wait() => {
             let output = child.wait_with_output().await?;
-            return Ok(output)
+            Ok(output)
         }
         _ = timeout => {
             child.kill().await.expect("failed to kill, just abort");
-            return Err(AceError::Timeout)
+            Err(AceError::Timeout)
         }
     }
 }
