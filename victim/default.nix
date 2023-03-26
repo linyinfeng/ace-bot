@@ -35,10 +35,6 @@
       RuntimeDirectory = "ace-bot";
       WorkingDirectory = "/var/lib/ace-bot";
 
-      LoadCredential = [
-        "token:/secrets/ace-bot-token"
-      ];
-
       Restart = "always";
       LimitNPROC = "100";
     };

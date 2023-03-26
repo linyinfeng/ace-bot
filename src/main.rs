@@ -137,7 +137,6 @@ fn preprocessing(raw: &str) -> String {
 }
 
 async fn handle_command(text: &str) -> Result<Output, AceError> {
-    log::error!("{text}");
     let timeout = sleep(Duration::from_secs(10));
 
     let mut child = tokio::process::Command::new("bash")
