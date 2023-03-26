@@ -42,29 +42,8 @@
         inputs.flake-parts.flakeModules.easyOverlay
         inputs.treefmt-nix.flakeModule
       ];
-      flake = let
-        mkHostAllSystems = {
-          name,
-          modules,
-        }:
-          lib.mkMerge (
-            lib.lists.map
-            (system: {
-              "${name}-${system}" = lib.nixosSystem {
-                inherit system;
-                modules = modules ++ [{nixpkgs.overlays = [config.flake.overlays.default];}];
-              };
-            })
-            config.systems
-          );
-      in {
-        nixosModules.victim = ./victim;
-        nixosConfigurations = mkHostAllSystems {
-          name = "victim";
-          modules = [
-            config.flake.nixosModules.victim
-          ];
-        };
+      flake = {
+        nixosModules.ace-bot = ./nixos/ace-bot.nix;
       };
       perSystem = {
         config,
@@ -104,7 +83,6 @@
             // {
               cargoClippyExtraArgs = "--all-targets -- --deny warnings";
             });
-          victim = self.nixosConfigurations."victim-${system}".config.system.build.toplevel;
         };
         treefmt = {
           projectRootFile = "flake.nix";
