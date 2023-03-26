@@ -104,6 +104,7 @@
             // {
               cargoClippyExtraArgs = "--all-targets -- --deny warnings";
             });
+          victim = self.nixosConfigurations."victim-${system}".config.system.build.toplevel;
         };
         treefmt = {
           projectRootFile = "flake.nix";
