@@ -36,7 +36,6 @@
       WorkingDirectory = "/var/lib/ace-bot";
 
       Restart = "always";
-      LimitNPROC = "100";
     };
 
     path = with pkgs; [
