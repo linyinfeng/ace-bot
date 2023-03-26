@@ -48,8 +48,6 @@ in {
 
       path = with pkgs; [
         bash
-        "/run/wrappers"
-        "/run/current-system/sw"
       ];
 
       environment =
