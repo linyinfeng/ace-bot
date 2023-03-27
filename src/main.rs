@@ -62,7 +62,8 @@ async fn handle_update(message: Message, bot: Bot) -> ResponseResult<()> {
                         Ok(output) => {
                             log::info!("command '{:?}': output: {:?}", bash_command, output);
                             let mut output_message = String::new();
-                            output_message.push_str(&utils::markdown::code_block(bash_command.trim()));
+                            output_message
+                                .push_str(&utils::markdown::code_block(bash_command.trim()));
                             output_message.push_str(&format!("{}", output.status));
                             if !output.stdout.is_empty() {
                                 output_message.push_str(&format!(
