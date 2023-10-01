@@ -53,7 +53,7 @@
         ...
       }: let
         craneLib = inputs.crane.lib.${system};
-        src = craneLib.cleanCargoSource ./.;
+        src = craneLib.cleanCargoSource (craneLib.path ./.);
         bareCommonArgs = {
           inherit src;
           nativeBuildInputs = with pkgs; [
@@ -63,6 +63,8 @@
             openssl
             sqlite
           ];
+          # TODO https://github.com/ipetkov/crane/issues/385
+          doNotLinkInheritedArtifacts = true;
         };
         cargoArtifacts = craneLib.buildDepsOnly bareCommonArgs;
         commonArgs = bareCommonArgs // {inherit cargoArtifacts;};
