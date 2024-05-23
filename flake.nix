@@ -12,9 +12,6 @@
 
     crane.url = "github:ipetkov/crane";
     crane.inputs.nixpkgs.follows = "nixpkgs";
-    crane.inputs.flake-compat.follows = "flake-compat";
-    crane.inputs.flake-utils.follows = "flake-utils";
-    crane.inputs.rust-overlay.follows = "rust-overlay";
 
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.flake-utils.follows = "flake-utils";
@@ -52,7 +49,7 @@
         system,
         ...
       }: let
-        craneLib = inputs.crane.lib.${system};
+        craneLib = inputs.crane.mkLib pkgs;
         src = craneLib.cleanCargoSource (craneLib.path ./.);
         bareCommonArgs = {
           inherit src;
