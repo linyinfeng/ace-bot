@@ -21,6 +21,7 @@ in {
       isNormalUser = true;
       group = "ace-bot";
       home = "/var/lib/ace-bot";
+      shell = pkgs.bashInteractive;
       linger = true;
     };
     systemd.tmpfiles.settings."80-ace-bot" = let
@@ -43,43 +44,21 @@ in {
     users.groups.ace-bot = {};
     systemd.services.ace-bot = {
       script = ''
-        echo "read ace-bot token"
-        export TELOXIDE_TOKEN=$(cat "$RUNTIME_DIRECTORY/token")
-        echo "clear ace-bot token"
-        rm "$RUNTIME_DIRECTORY/token"
-
-        export XDG_RUNTIME_DIR="/run/user/$UID"
-        export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+        export TELOXIDE_TOKEN=$(cat "$CREDENTIALS_DIRECTORY/token")
         exec ${pkgs.ace-bot}/bin/ace-bot
       '';
 
       serviceConfig = {
-        ExecStartPre = let
-          setupCredential = pkgs.writeShellScript "ace-bot-setup-credential" ''
-            echo "setup ace-bot token"
-            cp "${cfg.tokenFile}" "$RUNTIME_DIRECTORY/token"
-            chown ace-bot:ace-bot "$RUNTIME_DIRECTORY/token"
-            chmod 400 "$RUNTIME_DIRECTORY/token"
-          '';
-        in "+${setupCredential}";
-        User = "ace-bot";
-        Group = "ace-bot";
-
-        StateDirectory = "ace-bot";
-        RuntimeDirectory = "ace-bot";
-        WorkingDirectory = "/var/lib/ace-bot";
-
+        LoadCredential = [
+          "token:${cfg.tokenFile}"
+        ];
         Restart = "always";
       };
-
-      path = with pkgs; [
-        bash
-      ];
 
       environment =
         {
           "RUST_LOG" = "info";
-          "HOME" = "/var/lib/ace-bot";
+          "SHELL" = "${lib.getExe config.users.users.ace-bot.shell}";
         }
         // lib.optionalAttrs (cfg.managerChatId != null) {
           "MANAGER_CHAT_ID" = cfg.managerChatId;

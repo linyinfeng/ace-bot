@@ -21,6 +21,7 @@ static MANAGER_CHAT_ID: Lazy<Option<i64>> = Lazy::new(|| match std::env::var("MA
     Ok(s) => s.parse().ok(),
     Err(_) => None,
 });
+static SHELL: Lazy<String> = Lazy::new(|| std::env::var("String").unwrap_or("/bin/sh".to_string()));
 static BOT_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
     RegexBuilder::new("^(/bash@[a-zA-Z_]+|/bash)[[:space:]]+(.*)$")
         .dot_matches_new_line(true)
@@ -143,6 +144,7 @@ async fn handle_command(text: &str) -> Result<Output, AceError> {
     let mut child = tokio::process::Command::new("systemd-run")
         .args([
             "--user",
+            "--machine=ace-bot@.host",
             "--collect",
             "--quiet",
             "--wait",
@@ -152,7 +154,7 @@ async fn handle_command(text: &str) -> Result<Output, AceError> {
             "--property=TimeoutSec=60",
         ])
         .arg("--")
-        .args(["bash", "--login"])
+        .args([&SHELL, "--login"])
         .env_remove("TELOXIDE_TOKEN")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
