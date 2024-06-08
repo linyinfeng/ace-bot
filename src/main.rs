@@ -152,7 +152,7 @@ async fn handle_command(text: &str) -> Result<Output, AceError> {
             "--property=TimeoutSec=60",
         ])
         .arg("--")
-        .args(["bash"])
+        .args(["bash", "--login"])
         .env_remove("TELOXIDE_TOKEN")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
