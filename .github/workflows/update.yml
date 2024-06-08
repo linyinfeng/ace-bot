@@ -10,12 +10,6 @@ on:
 jobs:
   update:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    services:
-      oranc:
-        image: ghcr.io/linyinfeng/oranc
     steps:
     - name: Checkout
       uses: actions/checkout@main
