@@ -21,7 +21,7 @@ static MANAGER_CHAT_ID: Lazy<Option<i64>> = Lazy::new(|| match std::env::var("MA
     Ok(s) => s.parse().ok(),
     Err(_) => None,
 });
-static SHELL: Lazy<String> = Lazy::new(|| std::env::var("String").unwrap_or("/bin/sh".to_string()));
+static SHELL: Lazy<String> = Lazy::new(|| std::env::var("SHELL").unwrap_or("/bin/sh".to_string()));
 static BOT_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
     RegexBuilder::new("^(/bash@[a-zA-Z_]+|/bash)[[:space:]]+(.*)$")
         .dot_matches_new_line(true)
