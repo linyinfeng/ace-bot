@@ -52,7 +52,7 @@ in {
 
         export XDG_RUNTIME_DIR="/run/user/$UID"
         export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
-        ${pkgs.ace-bot}/bin/ace-bot
+        exec ${pkgs.ace-bot}/bin/ace-bot
       '';
 
       serviceConfig = {
