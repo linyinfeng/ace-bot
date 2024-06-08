@@ -140,7 +140,19 @@ fn preprocessing(raw: &str) -> String {
 async fn handle_command(text: &str) -> Result<Output, AceError> {
     let timeout = sleep(Duration::from_secs(60));
 
-    let mut child = tokio::process::Command::new("bash")
+    let mut child = tokio::process::Command::new("systemd-run")
+        .args([
+            "--user",
+            "--collect",
+            "--quiet",
+            "--wait",
+            "--pipe",
+            "--quiet",
+            "--service-type=oneshot",
+            "--property=TimeoutSec=60",
+        ])
+        .arg("--")
+        .args(["bash", "--login"])
         .env_remove("TELOXIDE_TOKEN")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

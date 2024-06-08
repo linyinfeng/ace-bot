@@ -17,6 +17,32 @@ in {
     };
   };
   config = lib.mkIf (cfg.enable) {
+    users.users.ace-bot = {
+      isNormalUser = true;
+      group = "ace-bot";
+      home = "/var/lib/ace-bot";
+      linger = true;
+    };
+    systemd.tmpfiles.settings."80-ace-bot" =
+    let
+      ownerOptions = {
+        user = config.users.users.ace-bot.name;
+        group = config.users.users.ace-bot.group;
+      };
+    in
+    {
+      ${config.users.users.ace-bot.home} = {
+        "d" = {
+          mode = "0700";
+          inherit (ownerOptions) user group;
+        };
+        "Z" = {
+          mode = "0700";
+          inherit (ownerOptions) user group;
+        };
+      };
+    };
+    users.groups.ace-bot = {};
     systemd.services.ace-bot = {
       script = ''
         echo "read ace-bot token"
@@ -24,7 +50,8 @@ in {
         echo "clear ace-bot token"
         rm "$RUNTIME_DIRECTORY/token"
 
-        export HOME="$PWD"
+        export XDG_RUNTIME_DIR="/run/user/$UID"
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
         ${pkgs.ace-bot}/bin/ace-bot
       '';
 
@@ -37,7 +64,8 @@ in {
             chmod 400 "$RUNTIME_DIRECTORY/token"
           '';
         in "+${setupCredential}";
-        DynamicUser = true;
+        User = "ace-bot";
+        Group = "ace-bot";
 
         StateDirectory = "ace-bot";
         RuntimeDirectory = "ace-bot";
@@ -53,6 +81,7 @@ in {
       environment =
         {
           "RUST_LOG" = "info";
+          "HOME" = "/var/lib/ace-bot";
         }
         // lib.optionalAttrs (cfg.managerChatId != null) {
           "MANAGER_CHAT_ID" = cfg.managerChatId;
