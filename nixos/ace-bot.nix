@@ -23,14 +23,12 @@ in {
       home = "/var/lib/ace-bot";
       linger = true;
     };
-    systemd.tmpfiles.settings."80-ace-bot" =
-    let
+    systemd.tmpfiles.settings."80-ace-bot" = let
       ownerOptions = {
         user = config.users.users.ace-bot.name;
         group = config.users.users.ace-bot.group;
       };
-    in
-    {
+    in {
       ${config.users.users.ace-bot.home} = {
         "d" = {
           mode = "0700";
