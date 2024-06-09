@@ -8,63 +8,95 @@
 in {
   options.services.ace-bot = {
     enable = lib.mkEnableOption "ace-bot";
+    disk = {
+      size = lib.mkOption {
+        type = with lib.types; nullOr str;
+        default = "1GiB";
+      };
+    };
     managerChatId = lib.mkOption {
       type = with lib.types; nullOr str;
       default = null;
     };
+    timeout = lib.mkOption {
+      type = with lib.types; nullOr str;
+      default = "60";
+    };
+    shell = lib.mkOption {
+      type = with lib.types; package;
+      default = pkgs.bashInteractive;
+      defaultText = "pkgs.bashInteractive";
+    };
+    extraOptions = lib.mkOption {
+      type = with lib.types; listOf str;
+      default = [];
+    };
     tokenFile = lib.mkOption {
       type = lib.types.path;
+    };
+    rustLog = lib.mkOption {
+      type = lib.types.str;
+      default = "info";
     };
   };
   config = lib.mkIf (cfg.enable) {
     users.users.ace-bot = {
       isNormalUser = true;
       group = "ace-bot";
-      home = "/var/lib/ace-bot";
-      shell = pkgs.bashInteractive;
-      linger = true;
-    };
-    systemd.tmpfiles.settings."80-ace-bot" = let
-      ownerOptions = {
-        user = config.users.users.ace-bot.name;
-        group = config.users.users.ace-bot.group;
-      };
-    in {
-      ${config.users.users.ace-bot.home} = {
-        "d" = {
-          mode = "0700";
-          inherit (ownerOptions) user group;
-        };
-        "Z" = {
-          mode = "0700";
-          inherit (ownerOptions) user group;
-        };
-      };
+      home = "/var/lib/ace-bot/home";
+      shell = cfg.shell;
     };
     users.groups.ace-bot = {};
     systemd.services.ace-bot = {
       script = ''
+        # setup token
         export TELOXIDE_TOKEN=$(cat "$CREDENTIALS_DIRECTORY/token")
-        exec ${pkgs.ace-bot}/bin/ace-bot
-      '';
 
+        # setup disk
+        if [ ! -f disk ]; then
+          fallocate -l "${cfg.disk.size}" disk
+          mkfs.ext4 disk
+        fi
+        mkdir --parents home
+        mount disk home
+        chown --recursive ace-bot:ace-bot home
+
+        exec ${pkgs.ace-bot}/bin/ace-bot \
+          --shell="${lib.getExe cfg.shell}" \
+          --timeout="${cfg.timeout}" \
+          ${lib.optionalString (cfg.managerChatId != null) ''--manager-chat-id="${cfg.managerChatId}"''} \
+          --working-directory="/var/lib/ace-bot/home"
+          ${lib.escapeShellArgs cfg.extraOptions}
+      '';
+      postStop = ''
+        umount home
+      '';
+      path = with pkgs; [
+        util-linux
+        e2fsprogs
+      ];
       serviceConfig = {
         LoadCredential = [
           "token:${cfg.tokenFile}"
         ];
+        StateDirectory = "ace-bot";
+        WorkingDirectory = "/var/lib/ace-bot";
         Restart = "always";
       };
-
-      environment =
-        {
-          "RUST_LOG" = "info";
-          "SHELL" = "${lib.getExe config.users.users.ace-bot.shell}";
-        }
-        // lib.optionalAttrs (cfg.managerChatId != null) {
-          "MANAGER_CHAT_ID" = cfg.managerChatId;
-        };
-
+      environment = {
+        "RUST_LOG" = cfg.rustLog;
+      };
       wantedBy = ["multi-user.target"];
+    };
+    systemd.slices.acebot = {
+      description = "ACE Bot Remote Codes";
+      sliceConfig = {
+        CPUWeight = "idle";
+        CPUQuota = "50%";
+        MemoryMax = "128M";
+        MemorySwapMax = "512M";
+        LimitNPROC = "100";
+      };
     };
   };
 }

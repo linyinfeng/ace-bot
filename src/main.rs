@@ -1,10 +1,8 @@
+use clap::Parser;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use regex::RegexBuilder;
-use std::{
-    process::{Output, Stdio},
-    time::Duration,
-};
+use std::process::{Output, Stdio};
 use teloxide::types::InputFile;
 use teloxide::types::{ParseMode, Recipient, User};
 use teloxide::{
@@ -14,14 +12,21 @@ use teloxide::{
     utils,
 };
 use tokio::io::AsyncWriteExt;
-use tokio::select;
-use tokio::time::sleep;
 
-static MANAGER_CHAT_ID: Lazy<Option<i64>> = Lazy::new(|| match std::env::var("MANAGER_CHAT_ID") {
-    Ok(s) => s.parse().ok(),
-    Err(_) => None,
-});
-static SHELL: Lazy<String> = Lazy::new(|| std::env::var("SHELL").unwrap_or("/bin/sh".to_string()));
+#[derive(Clone, Debug, Parser)]
+#[command(author, version, about)]
+pub struct Options {
+    #[arg(short, long, default_value = "60")]
+    pub timeout: usize,
+    #[arg(short, long, default_value = "/bin/sh")]
+    pub shell: String,
+    #[arg(short, long)]
+    pub manager_chat_id: Option<i64>,
+    #[arg(short, long)]
+    pub working_directory: String,
+}
+
+static OPTIONS: Lazy<Options> = Lazy::new(|| Options::parse());
 static BOT_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
     RegexBuilder::new("^(/bash@[a-zA-Z_]+|/bash)[[:space:]]+(.*)$")
         .dot_matches_new_line(true)
@@ -37,6 +42,7 @@ async fn main() {
 async fn run() {
     pretty_env_logger::init();
     log::info!("Starting ace-bot...");
+    log::info!("Options = {:#?}", *OPTIONS);
     let bot = Bot::from_env();
     teloxide::repl(bot, handle_update).await;
 }
@@ -56,47 +62,8 @@ async fn handle_update(message: Message, bot: Bot) -> ResponseResult<()> {
 
                     log::info!("{:?}: {}", user, bash_command);
                     log_for_manager(&bot, user, &bash_command).await?;
-                    match handle_command(&bash_command).await {
-                        Err(e) => {
-                            e.report(&message, &bot).await?;
-                        }
-                        Ok(output) => {
-                            log::info!("command '{:?}': output: {:?}", bash_command, output);
-                            let mut output_message = String::new();
-                            output_message
-                                .push_str(&utils::markdown::code_block(bash_command.trim()));
-                            output_message.push_str(&format!("{}", output.status));
-                            if !output.stdout.is_empty() {
-                                output_message.push_str(&format!(
-                                    "\n{}\n{}",
-                                    utils::markdown::escape("(stdout)"),
-                                    utils::markdown::code_block(&String::from_utf8_lossy(
-                                        &output.stdout
-                                    ))
-                                ));
-                            }
-                            if !output.stderr.is_empty() {
-                                output_message.push_str(&format!(
-                                    "\n{}\n{}",
-                                    utils::markdown::escape("(stderr)"),
-                                    utils::markdown::code_block(&String::from_utf8_lossy(
-                                        &output.stderr
-                                    ))
-                                ));
-                            }
-                            if output_message.len() >= 4000 {
-                                let document = InputFile::memory(output_message);
-                                bot.send_document(message.chat.id, document)
-                                    .reply_to_message_id(message.id)
-                                    .await?;
-                            } else {
-                                bot.send_message(message.chat.id, output_message)
-                                    .reply_to_message_id(message.id)
-                                    .parse_mode(ParseMode::MarkdownV2)
-                                    .await?;
-                            }
-                        }
-                    }
+                    // request error ignored
+                    tokio::spawn(handle_command(message, bot, bash_command));
                 }
                 _ => log::info!("ignored update: {:?}", message),
             },
@@ -108,7 +75,7 @@ async fn handle_update(message: Message, bot: Bot) -> ResponseResult<()> {
 }
 
 async fn log_for_manager(bot: &Bot, user: &User, text: &str) -> ResponseResult<()> {
-    let manager_id = match *MANAGER_CHAT_ID {
+    let manager_id = match OPTIONS.manager_chat_id {
         Some(id) => id,
         None => return Ok(()),
     };
@@ -138,44 +105,73 @@ fn preprocessing(raw: &str) -> String {
     text
 }
 
-async fn handle_command(text: &str) -> Result<Output, AceError> {
-    let timeout = sleep(Duration::from_secs(60));
+async fn handle_command(message: Message, bot: Bot, bash_command: String) -> ResponseResult<()> {
+    match run_command(&bash_command).await {
+        Err(e) => {
+            e.report(&message, &bot).await?;
+        }
+        Ok(output) => {
+            log::info!("command '{:?}': output: {:?}", bash_command, output);
+            let mut output_message = String::new();
+            output_message.push_str(&utils::markdown::code_block(bash_command.trim()));
+            output_message.push_str(&format!("{}", output.status));
+            if !output.stdout.is_empty() {
+                output_message.push_str(&format!(
+                    "\n{}\n{}",
+                    utils::markdown::escape("(stdout)"),
+                    utils::markdown::code_block(&String::from_utf8_lossy(&output.stdout))
+                ));
+            }
+            if !output.stderr.is_empty() {
+                output_message.push_str(&format!(
+                    "\n{}\n{}",
+                    utils::markdown::escape("(stderr)"),
+                    utils::markdown::code_block(&String::from_utf8_lossy(&output.stderr))
+                ));
+            }
+            if output_message.len() >= 4000 {
+                let document = InputFile::memory(output_message);
+                bot.send_document(message.chat.id, document)
+                    .reply_to_message_id(message.id)
+                    .await?;
+            } else {
+                bot.send_message(message.chat.id, output_message)
+                    .reply_to_message_id(message.id)
+                    .parse_mode(ParseMode::MarkdownV2)
+                    .await?;
+            }
+        }
+    }
+    Ok(())
+}
 
+async fn run_command(text: &str) -> Result<Output, AceError> {
     let mut child = tokio::process::Command::new("systemd-run")
         .args([
-            "--user",
-            "--machine=ace-bot@.host",
+            "--uid=ace-bot",
+            "--gid=ace-bot",
             "--collect",
             "--quiet",
             "--wait",
             "--pipe",
-            "--quiet",
             "--service-type=oneshot",
-            "--property=TimeoutSec=60",
+            &format!("--property=TimeoutStartSec={}", OPTIONS.timeout),
+            &format!("--working-directory={}", OPTIONS.working_directory),
+            "--slice=acebot.slice",
+            "--send-sighup",
         ])
         .arg("--")
-        .args([&SHELL, "--login"])
-        .env_remove("TELOXIDE_TOKEN")
+        .args([&OPTIONS.shell, "--login"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;
-
     let mut stdin = child.stdin.take().unwrap();
     stdin.write_all(text.as_bytes()).await?;
     drop(stdin);
-
-    select! {
-        _ = child.wait() => {
-            let output = child.wait_with_output().await?;
-            Ok(output)
-        }
-        _ = timeout => {
-            child.kill().await.expect("failed to kill, just abort");
-            Err(AceError::Timeout)
-        }
-    }
+    let output = child.wait_with_output().await?;
+    Ok(output)
 }
 
 #[derive(thiserror::Error, Debug)]
