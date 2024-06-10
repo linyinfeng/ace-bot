@@ -187,7 +187,8 @@ impl OutputMessage {
             }
             if !inlined {
                 message.push_str("\nattached");
-                if let Some(cmd) = pastebin_command(&client, "stdout", output.stdout.clone()).await {
+                if let Some(cmd) = pastebin_command(&client, "stdout", output.stdout.clone()).await
+                {
                     message.push_str(&format!("\n{}", utils::markdown::code_block(&cmd)))
                 }
                 documents.push(InputMedia::Document(InputMediaDocument::new(
@@ -207,7 +208,8 @@ impl OutputMessage {
             }
             if !inlined {
                 message.push_str("\nattached");
-                if let Some(cmd) = pastebin_command(&client, "stderr", output.stderr.clone()).await {
+                if let Some(cmd) = pastebin_command(&client, "stderr", output.stderr.clone()).await
+                {
                     message.push_str(&format!("\n{}", utils::markdown::code_block(&cmd)))
                 }
                 documents.push(InputMedia::Document(InputMediaDocument::new(
