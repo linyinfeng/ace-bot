@@ -1,10 +1,16 @@
 use clap::Parser;
+
 use once_cell::sync::Lazy;
 use regex::Regex;
 use regex::RegexBuilder;
+use reqwest::multipart;
+use reqwest::multipart::Part;
+use reqwest::StatusCode;
 use std::process::{Output, Stdio};
 use teloxide::types::InputFile;
-use teloxide::types::{ParseMode, Recipient, User};
+use teloxide::types::InputMedia;
+use teloxide::types::InputMediaDocument;
+use teloxide::types::{ParseMode, User};
 use teloxide::{
     prelude::*,
     requests::ResponseResult,
@@ -53,7 +59,7 @@ async fn handle_update(message: Message, bot: Bot) -> ResponseResult<()> {
             MediaKind::Text(text_media) => match &common_msg.from {
                 Some(user) => {
                     let raw_text = &text_media.text;
-                    log::info!("{:?} raw: {}", user, raw_text);
+                    log::debug!("{:?} raw: {}", user, raw_text);
                     let cleaned = match BOT_COMMAND_PATTERN.captures(raw_text) {
                         Some(c) => c[2].to_string(),
                         None => raw_text.to_string(),
@@ -61,39 +67,19 @@ async fn handle_update(message: Message, bot: Bot) -> ResponseResult<()> {
                     let bash_command = preprocessing(&cleaned);
 
                     log::info!("{:?}: {}", user, bash_command);
-                    log_for_manager(&bot, user, &bash_command).await?;
-                    // request error ignored
-                    tokio::spawn(handle_command(message, bot, bash_command));
+                    tokio::spawn(handle_command(
+                        message.clone(),
+                        bot,
+                        user.clone(),
+                        bash_command,
+                    ));
                 }
-                _ => log::info!("ignored update: {:?}", message),
+                _ => log::debug!("ignored update: {:?}", message),
             },
-            _ => log::info!("ignored update: {:?}", message),
+            _ => log::debug!("ignored update: {:?}", message),
         },
-        _ => log::info!("ignored update: {:?}", message),
+        _ => log::debug!("ignored update: {:?}", message),
     }
-    Ok(())
-}
-
-async fn log_for_manager(bot: &Bot, user: &User, text: &str) -> ResponseResult<()> {
-    let manager_id = match OPTIONS.manager_chat_id {
-        Some(id) => id,
-        None => return Ok(()),
-    };
-    let last_name = match &user.last_name {
-        Some(l) => l.to_string(),
-        None => String::new(),
-    };
-    bot.send_message(
-        Recipient::Id(ChatId(manager_id)),
-        format!(
-            "{} {}:\n{}",
-            utils::markdown::escape(&user.first_name),
-            utils::markdown::escape(&last_name),
-            utils::markdown::code_block(text)
-        ),
-    )
-    .parse_mode(ParseMode::MarkdownV2)
-    .await?;
     Ok(())
 }
 
@@ -105,40 +91,32 @@ fn preprocessing(raw: &str) -> String {
     text
 }
 
-async fn handle_command(message: Message, bot: Bot, bash_command: String) -> ResponseResult<()> {
+async fn handle_command(message: Message, bot: Bot, user: User, bash_command: String) {
+    if let Err(e) = handle_command_result(message, bot, user, bash_command).await {
+        log::warn!("request error: {}", e)
+    }
+}
+
+async fn handle_command_result(
+    message: Message,
+    bot: Bot,
+    user: User,
+    bash_command: String,
+) -> ResponseResult<()> {
     match run_command(&bash_command).await {
         Err(e) => {
             e.report(&message, &bot).await?;
         }
         Ok(output) => {
-            log::info!("command '{:?}': output: {:?}", bash_command, output);
-            let mut output_message = String::new();
-            output_message.push_str(&utils::markdown::code_block(bash_command.trim()));
-            output_message.push_str(&format!("{}", output.status));
-            if !output.stdout.is_empty() {
-                output_message.push_str(&format!(
-                    "\n{}\n{}",
-                    utils::markdown::escape("(stdout)"),
-                    utils::markdown::code_block(&String::from_utf8_lossy(&output.stdout))
-                ));
-            }
-            if !output.stderr.is_empty() {
-                output_message.push_str(&format!(
-                    "\n{}\n{}",
-                    utils::markdown::escape("(stderr)"),
-                    utils::markdown::code_block(&String::from_utf8_lossy(&output.stderr))
-                ));
-            }
-            if output_message.len() >= 4000 {
-                let document = InputFile::memory(output_message);
-                bot.send_document(message.chat.id, document)
-                    .reply_to_message_id(message.id)
-                    .await?;
-            } else {
-                bot.send_message(message.chat.id, output_message)
-                    .reply_to_message_id(message.id)
-                    .parse_mode(ParseMode::MarkdownV2)
-                    .await?;
+            let output_message = OutputMessage::format(&bash_command, &user, output).await;
+            let manager_id = match OPTIONS.manager_chat_id {
+                Some(id) => ChatId(id),
+                None => return Ok(()),
+            };
+            log::info!("command: '{bash_command:?}', output_message: {output_message:#?}");
+            output_message.send(&bot, message.chat.id).await?;
+            if manager_id != message.chat.id {
+                output_message.send(&bot, manager_id).await?;
             }
         }
     }
@@ -172,6 +150,128 @@ async fn run_command(text: &str) -> Result<Output, AceError> {
     drop(stdin);
     let output = child.wait_with_output().await?;
     Ok(output)
+}
+
+#[derive(Debug)]
+pub struct OutputMessage {
+    message: String,
+    documents: Vec<InputMedia>,
+}
+
+impl OutputMessage {
+    async fn format(bash_command: &str, user: &User, output: Output) -> OutputMessage {
+        let user = user_indicator(user);
+        const PART_LIMIT: usize = 1000;
+
+        let mut message = String::new();
+        let mut documents = Vec::new();
+        let client = reqwest::Client::new();
+
+        message.push_str(&format!("{}:\n", utils::markdown::escape(&user)));
+        if bash_command.len() < PART_LIMIT {
+            message.push_str(&utils::markdown::code_block(bash_command.trim()));
+        } else {
+            documents.push(InputMedia::Document(InputMediaDocument::new(
+                InputFile::memory(Vec::from(bash_command.as_bytes())).file_name("script"),
+            )));
+        }
+        message.push_str(&format!("{}", output.status));
+        if !output.stdout.is_empty() {
+            message.push_str(&format!("\n{}", utils::markdown::escape("(stdout)")));
+            let mut inlined = false;
+            if let Ok(s) = String::from_utf8(output.stdout.clone()) {
+                if s.len() < PART_LIMIT {
+                    inlined = true;
+                    message.push_str(&format!("\n{}", utils::markdown::code_block(&s)));
+                }
+            }
+            if !inlined {
+                message.push_str("\nattached");
+                if let Some(cmd) = pastebin_command(&client, "stdout", output.stdout.clone()).await {
+                    message.push_str(&format!("\n{}", utils::markdown::code_block(&cmd)))
+                }
+                documents.push(InputMedia::Document(InputMediaDocument::new(
+                    InputFile::memory(output.stdout).file_name("stdout"),
+                )));
+            }
+        }
+
+        if !output.stderr.is_empty() {
+            message.push_str(&format!("\n{}", utils::markdown::escape("(stderr)")));
+            let mut inlined = false;
+            if let Ok(s) = String::from_utf8(output.stderr.clone()) {
+                if s.len() < PART_LIMIT {
+                    inlined = true;
+                    message.push_str(&format!("\n{}", utils::markdown::code_block(&s)));
+                }
+            }
+            if !inlined {
+                message.push_str("\nattached");
+                if let Some(cmd) = pastebin_command(&client, "stderr", output.stderr.clone()).await {
+                    message.push_str(&format!("\n{}", utils::markdown::code_block(&cmd)))
+                }
+                documents.push(InputMedia::Document(InputMediaDocument::new(
+                    InputFile::memory(output.stderr).file_name("stderr"),
+                )));
+            }
+        }
+
+        OutputMessage { message, documents }
+    }
+
+    async fn send(&self, bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
+        let msg = bot
+            .send_message(chat_id, &self.message)
+            .parse_mode(ParseMode::MarkdownV2)
+            .await?;
+        if !self.documents.is_empty() {
+            bot.send_media_group(chat_id, self.documents.iter().cloned())
+                .reply_to_message_id(msg.id)
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+async fn pastebin_command(
+    client: &reqwest::Client,
+    file_name: &str,
+    data: Vec<u8>,
+) -> Option<String> {
+    let form = multipart::Form::new().part("c", Part::bytes(data).file_name(file_name.to_string()));
+    let result = client
+        .post("https://pb.li7g.com")
+        .multipart(form)
+        .send()
+        .await;
+    match result {
+        Ok(response) => {
+            if response.status() == StatusCode::OK {
+                match response.text().await {
+                    Ok(url) => Some(format!("curl {}", url.trim())),
+                    Err(e) => {
+                        log::warn!("pastebin body error: {e:#?}");
+                        None
+                    }
+                }
+            } else {
+                log::warn!("pastebin invalid response: {response:#?}");
+                log::warn!("  body: {:?}", response.text().await);
+                None
+            }
+        }
+        Err(e) => {
+            log::warn!("pastebin error: {e:#?}");
+            None
+        }
+    }
+}
+
+fn user_indicator(user: &User) -> String {
+    if let Some(s) = &user.username {
+        return format!("@{}", s);
+    }
+    user.first_name.to_string()
 }
 
 #[derive(thiserror::Error, Debug)]
