@@ -26,7 +26,7 @@ pub struct Options {
     pub working_directory: String,
 }
 
-static OPTIONS: Lazy<Options> = Lazy::new(|| Options::parse());
+static OPTIONS: Lazy<Options> = Lazy::new(Options::parse);
 static BOT_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
     RegexBuilder::new("^(/bash@[a-zA-Z_]+|/bash)[[:space:]]+(.*)$")
         .dot_matches_new_line(true)
