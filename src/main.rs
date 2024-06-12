@@ -113,7 +113,6 @@ async fn handle_command_result(
                 Some(id) => ChatId(id),
                 None => return Ok(()),
             };
-            log::info!("command: '{bash_command:?}', output_message: {output_message:#?}");
             output_message.send(&bot, message.chat.id).await?;
             if manager_id != message.chat.id {
                 output_message.send(&bot, manager_id).await?;
@@ -135,8 +134,36 @@ async fn run_command(text: &str) -> Result<Output, AceError> {
             "--service-type=oneshot",
             &format!("--property=TimeoutStartSec={}", OPTIONS.timeout),
             &format!("--working-directory={}", OPTIONS.working_directory),
+            &format!("--property=ReadWritePaths={}", OPTIONS.working_directory),
             "--slice=acebot.slice",
             "--send-sighup",
+            // security
+            "--property=NoNewPrivileges=true",
+            "--property=RemoveIPC=true",
+            "--property=PrivateTmp=true",
+            "--property=CapabilityBoundingSet=",
+            "--property=PrivateDevices=true",
+            "--property=ProtectClock=true",
+            "--property=ProtectKernelLogs=true",
+            "--property=ProtectKernelModules=true",
+            "--property=ProtectControlGroups=true",
+            "--property=PrivateMounts=true",
+            "--property=SystemCallArchitectures=native",
+            "--property=MemoryDenyWriteExecute=true",
+            "--property=RestrictNamespaces=true",
+            "--property=RestrictSUIDSGID=true",
+            "--property=ProtectHostname=true",
+            "--property=LockPersonality=true",
+            "--property=ProtectKernelTunables=true",
+            "--property=RestrictRealtime=true",
+            "--property=ProtectSystem=strict",
+            "--property=ProtectProc=invisible",
+            "--property=ProcSubset=pid",
+            "--property=ProtectHome=true",
+            "--property=PrivateUsers=true",
+            "--property=PrivateTmp=true",
+            "--property=SystemCallFilter=@system-service",
+            "--property=SystemCallErrorNumber=EPERM",
         ])
         .arg("--")
         .args([&OPTIONS.shell, "--login"])
@@ -162,6 +189,7 @@ impl OutputMessage {
     async fn format(bash_command: &str, user: &User, output: Output) -> OutputMessage {
         let user = user_indicator(user);
         const PART_LIMIT: usize = 1000;
+        const FILE_LIMIT: usize = 1024 * 1024; // 1 MiB
 
         let mut message = String::new();
         let mut documents = Vec::new();
@@ -186,14 +214,19 @@ impl OutputMessage {
                 }
             }
             if !inlined {
-                message.push_str("\nattached");
-                if let Some(cmd) = pastebin_command(&client, "stdout", output.stdout.clone()).await
-                {
-                    message.push_str(&format!("\n{}", utils::markdown::code_block(&cmd)))
+                if output.stdout.len() < FILE_LIMIT {
+                    message.push_str("\nattached");
+                    if let Some(cmd) =
+                        pastebin_command(&client, "stdout", output.stdout.clone()).await
+                    {
+                        message.push_str(&format!("\n{}", utils::markdown::code_block(&cmd)))
+                    }
+                    documents.push(InputMedia::Document(InputMediaDocument::new(
+                        InputFile::memory(output.stdout).file_name("stdout"),
+                    )));
+                } else {
+                    message.push_str("\nfile size limit exceeded");
                 }
-                documents.push(InputMedia::Document(InputMediaDocument::new(
-                    InputFile::memory(output.stdout).file_name("stdout"),
-                )));
             }
         }
 
@@ -207,14 +240,19 @@ impl OutputMessage {
                 }
             }
             if !inlined {
-                message.push_str("\nattached");
-                if let Some(cmd) = pastebin_command(&client, "stderr", output.stderr.clone()).await
-                {
-                    message.push_str(&format!("\n{}", utils::markdown::code_block(&cmd)))
+                if output.stderr.len() < FILE_LIMIT {
+                    message.push_str("\nattached");
+                    if let Some(cmd) =
+                        pastebin_command(&client, "stderr", output.stderr.clone()).await
+                    {
+                        message.push_str(&format!("\n{}", utils::markdown::code_block(&cmd)))
+                    }
+                    documents.push(InputMedia::Document(InputMediaDocument::new(
+                        InputFile::memory(output.stderr).file_name("stderr"),
+                    )));
+                } else {
+                    message.push_str("\nfile size limit exceeded");
                 }
-                documents.push(InputMedia::Document(InputMediaDocument::new(
-                    InputFile::memory(output.stderr).file_name("stderr"),
-                )));
             }
         }
 
