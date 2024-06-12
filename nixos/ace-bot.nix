@@ -14,7 +14,7 @@ in {
     enable = lib.mkEnableOption "ace-bot";
     packages = lib.mkOption {
       type = with lib.types; listOf package;
-      default = with pkgs; [ coreutils ];
+      default = with pkgs; [coreutils];
     };
     disk = {
       size = lib.mkOption {
@@ -54,7 +54,7 @@ in {
       home = "/var/lib/ace-bot/home";
       shell = cfg.shell;
     };
-    users.groups.ace-bot = { };
+    users.groups.ace-bot = {};
     systemd.services.ace-bot = {
       script = ''
         # setup token
