@@ -30,6 +30,10 @@ pub struct Options {
     pub manager_chat_id: Option<i64>,
     #[arg(short, long)]
     pub working_directory: String,
+    #[arg(short, long)]
+    pub root_directory: String,
+    #[arg(short, long)]
+    pub environment: String,
 }
 
 static OPTIONS: Lazy<Options> = Lazy::new(Options::parse);
@@ -133,8 +137,10 @@ async fn run_command(text: &str) -> Result<Output, AceError> {
             "--pipe",
             "--service-type=oneshot",
             &format!("--property=TimeoutStartSec={}", OPTIONS.timeout),
+            &format!("--property=RootDirectory={}", OPTIONS.root_directory),
             &format!("--working-directory={}", OPTIONS.working_directory),
-            &format!("--property=ReadWritePaths={}", OPTIONS.working_directory),
+            &format!("--property=BindPaths={}", OPTIONS.working_directory),
+            &format!("--setenv=PATH={}/bin:/run/current-system/bin", OPTIONS.environment),
             "--slice=acebot.slice",
             "--send-sighup",
             // security
@@ -164,6 +170,10 @@ async fn run_command(text: &str) -> Result<Output, AceError> {
             "--property=PrivateTmp=true",
             "--property=SystemCallFilter=@system-service",
             "--property=SystemCallErrorNumber=EPERM",
+            // relaxing
+            "--property=BindReadOnlyPaths=/dev/log /run/systemd/journal/socket /run/systemd/journal/stdout",
+            "--property=BindReadOnlyPaths=/nix",
+            "--property=BindReadOnlyPaths=/run/current-system/bin",
         ])
         .arg("--")
         .args([&OPTIONS.shell, "--login"])

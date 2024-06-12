@@ -5,9 +5,17 @@
   ...
 }: let
   cfg = config.services.ace-bot;
+  env = pkgs.buildEnv {
+    name = "ace-bot-env";
+    paths = cfg.packages;
+  };
 in {
   options.services.ace-bot = {
     enable = lib.mkEnableOption "ace-bot";
+    packages = lib.mkOption {
+      type = with lib.types; listOf package;
+      default = with pkgs; [ coreutils ];
+    };
     disk = {
       size = lib.mkOption {
         type = with lib.types; nullOr str;
@@ -41,12 +49,12 @@ in {
   };
   config = lib.mkIf (cfg.enable) {
     users.users.ace-bot = {
-      isNormalUser = true;
+      isSystemUser = true;
       group = "ace-bot";
       home = "/var/lib/ace-bot/home";
       shell = cfg.shell;
     };
-    users.groups.ace-bot = {};
+    users.groups.ace-bot = { };
     systemd.services.ace-bot = {
       script = ''
         # setup token
@@ -61,11 +69,17 @@ in {
         mount disk home
         chown --recursive ace-bot:ace-bot home
 
+        # setup root
+        rm --recursive --force root
+        mkdir --parents root
+
         exec ${pkgs.ace-bot}/bin/ace-bot \
           --shell="${lib.getExe cfg.shell}" \
           --timeout="${cfg.timeout}" \
           ${lib.optionalString (cfg.managerChatId != null) ''--manager-chat-id="${cfg.managerChatId}"''} \
-          --working-directory="/var/lib/ace-bot/home"
+          --working-directory="/var/lib/ace-bot/home" \
+          --root-directory="/var/lib/ace-bot/root" \
+          --environment="${env}"
           ${lib.escapeShellArgs cfg.extraOptions}
       '';
       postStop = ''
