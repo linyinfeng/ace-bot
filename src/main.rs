@@ -174,6 +174,7 @@ async fn run_command(text: &str) -> Result<Output, AceError> {
             "--property=BindReadOnlyPaths=/dev/log /run/systemd/journal/socket /run/systemd/journal/stdout",
             "--property=BindReadOnlyPaths=/nix",
             "--property=BindReadOnlyPaths=/run/current-system/bin",
+            "--property=BindReadOnlyPaths=/etc",
         ])
         .arg("--")
         .args([&OPTIONS.shell, "--login"])
