@@ -79,7 +79,7 @@ in {
           ${lib.optionalString (cfg.managerChatId != null) ''--manager-chat-id="${cfg.managerChatId}"''} \
           --working-directory="/var/lib/ace-bot/home" \
           --root-directory="/var/lib/ace-bot/root" \
-          --environment="${env}"
+          --environment="${env}" \
           ${lib.escapeShellArgs cfg.extraOptions}
       '';
       postStop = ''
