@@ -28,12 +28,6 @@ pub struct Options {
     pub shell: String,
     #[arg(short, long)]
     pub manager_chat_id: Option<i64>,
-    #[arg(short, long)]
-    pub working_directory: String,
-    #[arg(short, long)]
-    pub root_directory: String,
-    #[arg(short, long)]
-    pub environment: String,
 }
 
 static OPTIONS: Lazy<Options> = Lazy::new(Options::parse);
@@ -129,51 +123,17 @@ async fn handle_command_result(
 async fn run_command(text: &str) -> Result<Output, AceError> {
     let mut child = tokio::process::Command::new("systemd-run")
         .args([
-            "--uid=ace-bot",
-            "--gid=ace-bot",
+            "--machine=ace-bot",
             "--collect",
             "--quiet",
             "--wait",
             "--pipe",
+            "--uid=ace-bot",
+            "--gid=ace-bot",
+            "--working-directory=/run/host/home/ace-bot",
             "--service-type=oneshot",
             &format!("--property=TimeoutStartSec={}", OPTIONS.timeout),
-            &format!("--property=RootDirectory={}", OPTIONS.root_directory),
-            &format!("--working-directory={}", OPTIONS.working_directory),
-            &format!("--property=BindPaths={}", OPTIONS.working_directory),
-            &format!("--setenv=PATH={}/bin:/run/current-system/bin", OPTIONS.environment),
-            "--slice=acebot.slice",
             "--send-sighup",
-            // security
-            "--property=NoNewPrivileges=true",
-            "--property=RemoveIPC=true",
-            "--property=PrivateTmp=true",
-            "--property=CapabilityBoundingSet=",
-            "--property=PrivateDevices=true",
-            "--property=ProtectClock=true",
-            "--property=ProtectKernelLogs=true",
-            "--property=ProtectKernelModules=true",
-            "--property=ProtectControlGroups=true",
-            "--property=PrivateMounts=true",
-            "--property=SystemCallArchitectures=native",
-            "--property=MemoryDenyWriteExecute=true",
-            "--property=RestrictNamespaces=true",
-            "--property=RestrictSUIDSGID=true",
-            "--property=ProtectHostname=true",
-            "--property=LockPersonality=true",
-            "--property=ProtectKernelTunables=true",
-            "--property=RestrictRealtime=true",
-            "--property=ProtectSystem=strict",
-            "--property=ProtectProc=invisible",
-            "--property=ProcSubset=pid",
-            "--property=ProtectHome=true",
-            "--property=PrivateUsers=true",
-            "--property=PrivateTmp=true",
-            "--property=SystemCallFilter=@system-service",
-            "--property=SystemCallErrorNumber=EPERM",
-            // relaxing
-            "--property=BindReadOnlyPaths=/dev/log /run/systemd/journal/socket /run/systemd/journal/stdout",
-            "--property=BindReadOnlyPaths=/nix",
-            "--property=BindReadOnlyPaths=/run/current-system/bin",
         ])
         .arg("--")
         .args([&OPTIONS.shell, "--login"])

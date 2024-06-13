@@ -5,21 +5,96 @@
   ...
 }: let
   cfg = config.services.ace-bot;
-  env = pkgs.buildEnv {
-    name = "ace-bot-env";
-    paths = cfg.packages;
+  nixosSystem = args:
+    import "${pkgs.path}/nixos/lib/eval-config.nix" ({
+        inherit lib;
+        system = null;
+        modules =
+          args.modules
+          ++ [
+            ({modulesPath, ...}: {
+              # read only pkgs
+              nixpkgs.pkgs = lib.mkForce pkgs;
+              system = {inherit (config.system) stateVersion;};
+            })
+          ];
+      }
+      // removeAttrs args ["modules"]);
+  envConfiguration = nixosSystem {
+    modules =
+      [
+        ({modulesPath, ...}: {
+          # container settings
+          boot.isContainer = true;
+          networking.useNetworkd = true;
+          networking.useDHCP = false;
+          networking.useHostResolvConf = false;
+          services.resolved.enable = true;
+          imports = [
+            "${modulesPath}/profiles/minimal.nix"
+          ];
+        })
+        ({pkgs, ...}: {
+          environment.systemPackages = [cfg.shell];
+        })
+        ({pkgs, ...}: {
+          # store settings
+          nix.package = pkgs.nixVersions.latest; # for the local-overlay-store option
+          nix.settings = {
+            experimental-features = [
+              "local-overlay-store"
+              "read-only-local-store"
+            ];
+          };
+          systemd.services."setup-nix-store" = {
+            script = ''
+              mount --types overlay overlay \
+                --options lowerdir=/mnt/store-host/nix/store \
+                --options upperdir=/mnt/store-disk/upper \
+                --options workdir=/mnt/store-disk/work \
+                --options userxattr \
+                /nix/store
+
+              mkdir --parents /root/.config/nix
+              # lower store: a read only chroot store in /mnt/store-host
+              cat >/root/.config/nix/nix.conf <<EOF
+              store = local-overlay://?real=/nix/store&state=/nix/var&lower-store=/mnt/store-host?read-only=true&upper-layer=/mnt/store-disk/upper
+              EOF
+            '';
+            path = with pkgs; [
+              util-linux
+            ];
+            serviceConfig = {
+              Type = "oneshot";
+            };
+            wantedBy = ["local-fs.target"];
+          };
+        })
+        ({pkgs, ...}: {
+          # extra nix settings
+          nix.settings = {
+            allowed-users = ["ace-bot"];
+            use-xdg-base-directories = true;
+            experimental-features = [
+              "nix-command"
+              "flakes"
+            ];
+          };
+        })
+      ]
+      ++ cfg.extraModules;
   };
 in {
   options.services.ace-bot = {
     enable = lib.mkEnableOption "ace-bot";
-    packages = lib.mkOption {
-      type = with lib.types; listOf package;
-      default = with pkgs; [coreutils];
+    extraModules = lib.mkOption {
+      type = with lib.types; listOf unspecified;
+      default = [];
     };
     disk = {
       size = lib.mkOption {
         type = with lib.types; nullOr str;
-        default = "1GiB";
+        default = "5GiB";
       };
     };
     managerChatId = lib.mkOption {
@@ -33,7 +108,6 @@ in {
     shell = lib.mkOption {
       type = with lib.types; package;
       default = pkgs.bashInteractive;
-      defaultText = "pkgs.bashInteractive";
     };
     extraOptions = lib.mkOption {
       type = with lib.types; listOf str;
@@ -46,49 +120,43 @@ in {
       type = lib.types.str;
       default = "info";
     };
+    privateUsers = {
+      uidBase = lib.mkOption {
+        type = with lib.types;
+          int
+          // {
+            check = v: int.check v && 524288 <= v && v <= 1878982656;
+          };
+        default = 7077888;
+      };
+      gidBase = lib.mkOption {
+        type = with lib.types;
+          int
+          // {
+            check = v: int.check v && 524288 <= v && v <= 1878982656;
+          };
+        default = 7077888;
+      };
+    };
   };
   config = lib.mkIf (cfg.enable) {
     users.users.ace-bot = {
       isSystemUser = true;
-      group = "ace-bot";
-      home = "/var/lib/ace-bot/home";
+      home = "/var/lib/ace-bot/mount/disk/home";
       shell = cfg.shell;
+      group = "ace-bot";
     };
     users.groups.ace-bot = {};
     systemd.services.ace-bot = {
       script = ''
         # setup token
         export TELOXIDE_TOKEN=$(cat "$CREDENTIALS_DIRECTORY/token")
-
-        # setup disk
-        if [ ! -f disk ]; then
-          fallocate -l "${cfg.disk.size}" disk
-          mkfs.ext4 disk
-        fi
-        mkdir --parents home
-        mount disk home
-        chown --recursive ace-bot:ace-bot home
-
-        # setup root
-        rm --recursive --force root
-        mkdir --parents root
-
         exec ${pkgs.ace-bot}/bin/ace-bot \
           --shell="${lib.getExe cfg.shell}" \
           --timeout="${cfg.timeout}" \
           ${lib.optionalString (cfg.managerChatId != null) ''--manager-chat-id="${cfg.managerChatId}"''} \
-          --working-directory="/var/lib/ace-bot/home" \
-          --root-directory="/var/lib/ace-bot/root" \
-          --environment="${env}" \
           ${lib.escapeShellArgs cfg.extraOptions}
       '';
-      postStop = ''
-        umount home
-      '';
-      path = with pkgs; [
-        util-linux
-        e2fsprogs
-      ];
       serviceConfig = {
         LoadCredential = [
           "token:${cfg.tokenFile}"
@@ -107,10 +175,96 @@ in {
       sliceConfig = {
         CPUWeight = "idle";
         CPUQuota = "50%";
-        MemoryMax = "128M";
-        MemorySwapMax = "512M";
-        LimitNPROC = "100";
+        MemoryMax = "1G";
+        MemorySwapMax = "2G";
+        LimitNProc = 2048;
       };
     };
+    systemd.targets.machines.wants = ["systemd-nspawn@ace-bot.service"];
+    systemd.services."systemd-nspawn@ace-bot" = {
+      overrideStrategy = "asDropin";
+      serviceConfig = {
+        Restart = "always";
+        Slice = "acebot.slice";
+      };
+      restartTriggers = [
+        config.environment.etc."systemd/nspawn".source
+      ];
+    };
+    systemd.services."ace-bot-image" = {
+      wantedBy = ["systemd-nspawn@ace-bot.service"];
+      before = ["systemd-nspawn@ace-bot.service"];
+      partOf = ["systemd-nspawn@ace-bot.service"];
+      script = ''
+        set -x
+        # setup disk
+        if [ ! -f disk ]; then
+          fallocate -l "${cfg.disk.size}" disk
+          mkfs.ext4 disk
+        fi
+        mkdir --parents mount/disk
+        mount disk mount/disk
+        rm --recursive --force mount/disk/store/work
+        mkdir --parents mount/disk/store/{upper,work,state}
+        mkdir --parents mount/disk/home
+        chown --recursive ace-bot:ace-bot mount/disk/home
+
+        # setup image
+        # just an empty directory
+        mkdir /var/lib/machines/ace-bot
+        # parents of mount points for overlay fs
+        mkdir /var/lib/machines/ace-bot/nix
+      '';
+      postStop = ''
+        set +e
+        set -x
+        umount mount/disk
+        rmdir mount/disk
+        rmdir mount
+        rm --recursive --force /var/lib/machines/ace-bot
+      '';
+      path = with pkgs; [
+        util-linux
+        e2fsprogs
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        StateDirectory = "ace-bot";
+        WorkingDirectory = "/var/lib/ace-bot";
+      };
+    };
+    systemd.nspawn."ace-bot" = {
+      execConfig = {
+        Boot = false;
+        Parameters = let
+          initName =
+            if envConfiguration.config.boot.initrd.systemd.enable
+            then "prepare-root"
+            else "init";
+        in "${envConfiguration.config.system.build.toplevel}/${initName}";
+        PrivateUsers = "${toString cfg.privateUsers.uidBase}:${toString cfg.privateUsers.gidBase}";
+        LinkJournal = "host";
+      };
+      filesConfig = let
+        disk = "/var/lib/ace-bot/mount/disk";
+      in {
+        PrivateUsersOwnership = "map";
+        Bind = [
+          "${disk}/store/state:/nix/var:idmap"
+          "${disk}/store:/mnt/store-disk:idmap"
+        ];
+        BindReadOnly = [
+          "/nix:/mnt/store-host/nix:idmap,norbind"
+        ];
+        OverlayReadOnly = [
+          "+/mnt/store-host/nix/store:+/mnt/store-disk/upper:/nix/store"
+        ];
+        BindUser = ["ace-bot"];
+      };
+    };
+    networking.firewall.allowedUDPPorts = [
+      67 # DHCP server
+    ];
   };
 }
