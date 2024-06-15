@@ -13,8 +13,10 @@
           args.modules
           ++ [
             ({modulesPath, ...}: {
-              # read only pkgs
-              nixpkgs.pkgs = lib.mkForce pkgs;
+              imports = [
+                "${modulesPath}/misc/nixpkgs/read-only.nix"
+              ];
+              nixpkgs.pkgs = pkgs;
               system = {inherit (config.system) stateVersion;};
             })
           ];
@@ -30,9 +32,6 @@
           networking.useDHCP = false;
           networking.useHostResolvConf = false;
           services.resolved.enable = true;
-          imports = [
-            "${modulesPath}/profiles/minimal.nix"
-          ];
         })
         ({pkgs, ...}: {
           environment.systemPackages = [cfg.shell];
