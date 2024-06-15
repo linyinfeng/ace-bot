@@ -161,7 +161,9 @@ async fn run_command(mode: Mode, text: &str) -> Result<Output, AceError> {
                 "--working-directory=/run/host/home/ace-bot",
             ]);
         }
-        Mode::Root => (),
+        Mode::Root => {
+            command.args(["--working-directory=/root"]);
+        }
     }
     command
         .arg("--")
