@@ -154,6 +154,12 @@ in {
           --shell="${lib.getExe cfg.shell}" \
           --timeout="${cfg.timeout}" \
           ${lib.optionalString (cfg.managerChatId != null) ''--manager-chat-id="${cfg.managerChatId}"''} \
+          --machine="ace-bot" \
+          --reset-indicator="/var/lib/machines/ace-bot/reset" \
+          --machine-unit="systemd-nspawn@ace-bot.service" \
+          --user-mode-uid="ace-bot" \
+          --user-mode-gid="ace-bot" \
+          --user-home="/run/host/home/ace-bot" \
           ${lib.escapeShellArgs cfg.extraOptions}
       '';
       serviceConfig = {
@@ -198,7 +204,7 @@ in {
         set -x
         # setup disk
         if [ ! -f disk ]; then
-          fallocate -l "${cfg.disk.size}" disk
+          fallocate --length "${cfg.disk.size}" disk
           mkfs.ext4 disk
         fi
         mkdir --parents mount/disk

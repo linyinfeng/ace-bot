@@ -6,6 +6,7 @@ use regex::RegexBuilder;
 use reqwest::multipart;
 use reqwest::multipart::Part;
 use reqwest::StatusCode;
+use std::path::PathBuf;
 use std::process::{Output, Stdio};
 use teloxide::types::InputFile;
 use teloxide::types::InputMedia;
@@ -17,17 +18,30 @@ use teloxide::{
     types::{MediaKind, MessageKind},
     utils,
 };
+use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
 #[derive(Clone, Debug, Parser)]
 #[command(author, version, about)]
-pub struct Options {
+struct Options {
     #[arg(short, long, default_value = "60")]
     pub timeout: usize,
     #[arg(short, long, default_value = "/bin/sh")]
     pub shell: String,
     #[arg(short, long)]
     pub manager_chat_id: Option<i64>,
+    #[arg(long)]
+    pub user_mode_uid: String,
+    #[arg(long)]
+    pub user_mode_gid: String,
+    #[arg(long)]
+    pub user_home: String,
+    #[arg(long)]
+    pub machine: String,
+    #[arg(long)]
+    pub reset_indicator: PathBuf,
+    #[arg(long)]
+    pub machine_unit: String,
 }
 
 static OPTIONS: Lazy<Options> = Lazy::new(Options::parse);
@@ -43,9 +57,15 @@ static ROOT_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
         .build()
         .unwrap()
 });
+static RESET_COMMAND_PATTER: Lazy<Regex> = Lazy::new(|| {
+    RegexBuilder::new("^(/reset@[a-zA-Z_]+|/reset)[[:space:]]*(.*)$")
+        .dot_matches_new_line(true)
+        .build()
+        .unwrap()
+});
 
 #[derive(Clone, Copy, Debug)]
-pub enum Mode {
+enum Mode {
     User,
     Root,
 }
@@ -70,6 +90,11 @@ async fn handle_update(message: Message, bot: Bot) -> ResponseResult<()> {
                 Some(user) => {
                     let raw_text = &text_media.text;
                     log::debug!("{:?} raw: {}", user, raw_text);
+                    if RESET_COMMAND_PATTER.is_match(raw_text) {
+                        tokio::spawn(handle_reset(message.clone(), bot.clone(), user.clone()));
+                        return Ok(());
+                    }
+
                     let mut mode = Mode::User;
                     let cleaned = match USER_COMMAND_PATTERN.captures(raw_text) {
                         Some(c) => c[2].to_string(),
@@ -115,6 +140,12 @@ async fn handle_command(message: Message, bot: Bot, user: User, mode: Mode, bash
     }
 }
 
+async fn handle_reset(message: Message, bot: Bot, user: User) {
+    if let Err(e) = handle_reset_result(message, bot, user).await {
+        log::warn!("request error: {}", e)
+    }
+}
+
 async fn handle_command_result(
     message: Message,
     bot: Bot,
@@ -141,10 +172,30 @@ async fn handle_command_result(
     Ok(())
 }
 
+async fn handle_reset_result(message: Message, bot: Bot, user: User) -> ResponseResult<()> {
+    match run_reset().await {
+        Err(e) => {
+            e.report(&message, &bot).await?;
+        }
+        Ok(output) => {
+            let output_message = OutputMessage::format("/reset", &user, output).await;
+            let manager_id = match OPTIONS.manager_chat_id {
+                Some(id) => ChatId(id),
+                None => return Ok(()),
+            };
+            output_message.send(&bot, message.chat.id).await?;
+            if manager_id != message.chat.id {
+                output_message.send(&bot, manager_id).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn run_command(mode: Mode, text: &str) -> Result<Output, AceError> {
     let mut command = tokio::process::Command::new("systemd-run");
     command.args([
-        "--machine=ace-bot",
+        &format!("--machine={}", OPTIONS.machine),
         "--collect",
         "--quiet",
         "--wait",
@@ -156,9 +207,9 @@ async fn run_command(mode: Mode, text: &str) -> Result<Output, AceError> {
     match mode {
         Mode::User => {
             command.args([
-                "--uid=ace-bot",
-                "--gid=ace-bot",
-                "--working-directory=/run/host/home/ace-bot",
+                &format!("--uid={}", OPTIONS.user_mode_uid),
+                &format!("--gid={}", OPTIONS.user_mode_gid),
+                &format!("--working-directory={}", OPTIONS.user_home),
             ]);
         }
         Mode::Root => {
@@ -177,6 +228,15 @@ async fn run_command(mode: Mode, text: &str) -> Result<Output, AceError> {
     stdin.write_all(text.as_bytes()).await?;
     drop(stdin);
     let output = child.wait_with_output().await?;
+    Ok(output)
+}
+
+async fn run_reset() -> Result<Output, AceError> {
+    File::create(&OPTIONS.reset_indicator).await?;
+    let output = tokio::process::Command::new("systemctl")
+        .args(["restart", &OPTIONS.machine_unit])
+        .output()
+        .await?;
     Ok(output)
 }
 
