@@ -220,6 +220,9 @@ in {
         umount mount/disk
         rmdir mount/disk
         rmdir mount
+        if [ -f /var/lib/machines/ace-bot/reset ]; then
+          rm disk
+        fi
         rm --recursive --force /var/lib/machines/ace-bot
       '';
       path = with pkgs; [

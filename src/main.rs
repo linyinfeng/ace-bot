@@ -31,12 +31,24 @@ pub struct Options {
 }
 
 static OPTIONS: Lazy<Options> = Lazy::new(Options::parse);
-static BOT_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    RegexBuilder::new("^(/bash@[a-zA-Z_]+|/bash)[[:space:]]+(.*)$")
+static USER_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    RegexBuilder::new("^(/user@[a-zA-Z_]+|/user)[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
         .build()
         .unwrap()
 });
+static ROOT_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    RegexBuilder::new("^(/root@[a-zA-Z_]+|/root)[[:space:]]*(.*)$")
+        .dot_matches_new_line(true)
+        .build()
+        .unwrap()
+});
+
+#[derive(Clone, Copy, Debug)]
+pub enum Mode {
+    User,
+    Root,
+}
 
 #[tokio::main]
 async fn main() {
@@ -58,17 +70,25 @@ async fn handle_update(message: Message, bot: Bot) -> ResponseResult<()> {
                 Some(user) => {
                     let raw_text = &text_media.text;
                     log::debug!("{:?} raw: {}", user, raw_text);
-                    let cleaned = match BOT_COMMAND_PATTERN.captures(raw_text) {
+                    let mut mode = Mode::User;
+                    let cleaned = match USER_COMMAND_PATTERN.captures(raw_text) {
                         Some(c) => c[2].to_string(),
-                        None => raw_text.to_string(),
+                        None => match ROOT_COMMAND_PATTERN.captures(raw_text) {
+                            Some(c) => {
+                                mode = Mode::Root;
+                                c[2].to_string()
+                            }
+                            None => raw_text.to_string(),
+                        },
                     };
                     let bash_command = preprocessing(&cleaned);
 
-                    log::info!("{:?}: {}", user, bash_command);
+                    log::info!("{:?} ({:?}): {}", user, mode, bash_command);
                     tokio::spawn(handle_command(
                         message.clone(),
                         bot,
                         user.clone(),
+                        mode,
                         bash_command,
                     ));
                 }
@@ -89,8 +109,8 @@ fn preprocessing(raw: &str) -> String {
     text
 }
 
-async fn handle_command(message: Message, bot: Bot, user: User, bash_command: String) {
-    if let Err(e) = handle_command_result(message, bot, user, bash_command).await {
+async fn handle_command(message: Message, bot: Bot, user: User, mode: Mode, bash_command: String) {
+    if let Err(e) = handle_command_result(message, bot, user, mode, bash_command).await {
         log::warn!("request error: {}", e)
     }
 }
@@ -99,9 +119,10 @@ async fn handle_command_result(
     message: Message,
     bot: Bot,
     user: User,
+    mode: Mode,
     bash_command: String,
 ) -> ResponseResult<()> {
-    match run_command(&bash_command).await {
+    match run_command(mode, &bash_command).await {
         Err(e) => {
             e.report(&message, &bot).await?;
         }
@@ -120,28 +141,35 @@ async fn handle_command_result(
     Ok(())
 }
 
-async fn run_command(text: &str) -> Result<Output, AceError> {
-    let mut child = tokio::process::Command::new("systemd-run")
-        .args([
+async fn run_command(mode: Mode, text: &str) -> Result<Output, AceError> {
+    let mut command = tokio::process::Command::new("systemd-run");
+    command.args([
             "--machine=ace-bot",
             "--collect",
             "--quiet",
             "--wait",
             "--pipe",
-            "--uid=ace-bot",
-            "--gid=ace-bot",
-            "--working-directory=/run/host/home/ace-bot",
             "--service-type=oneshot",
             &format!("--property=TimeoutStartSec={}", OPTIONS.timeout),
             "--send-sighup",
-        ])
-        .arg("--")
+        ]);
+    match mode {
+        Mode::User => {
+            command.args([
+                "--uid=ace-bot",
+                "--gid=ace-bot",
+                "--working-directory=/run/host/home/ace-bot",
+            ]);
+        }
+        Mode::Root => (),
+    }
+    command.arg("--")
         .args([&OPTIONS.shell, "--login"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()?;
+        .kill_on_drop(true);
+    let mut child = command.spawn()?;
     let mut stdin = child.stdin.take().unwrap();
     stdin.write_all(text.as_bytes()).await?;
     drop(stdin);
