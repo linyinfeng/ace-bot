@@ -144,15 +144,15 @@ async fn handle_command_result(
 async fn run_command(mode: Mode, text: &str) -> Result<Output, AceError> {
     let mut command = tokio::process::Command::new("systemd-run");
     command.args([
-            "--machine=ace-bot",
-            "--collect",
-            "--quiet",
-            "--wait",
-            "--pipe",
-            "--service-type=oneshot",
-            &format!("--property=TimeoutStartSec={}", OPTIONS.timeout),
-            "--send-sighup",
-        ]);
+        "--machine=ace-bot",
+        "--collect",
+        "--quiet",
+        "--wait",
+        "--pipe",
+        "--service-type=oneshot",
+        &format!("--property=TimeoutStartSec={}", OPTIONS.timeout),
+        "--send-sighup",
+    ]);
     match mode {
         Mode::User => {
             command.args([
@@ -163,7 +163,8 @@ async fn run_command(mode: Mode, text: &str) -> Result<Output, AceError> {
         }
         Mode::Root => (),
     }
-    command.arg("--")
+    command
+        .arg("--")
         .args([&OPTIONS.shell, "--login"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
