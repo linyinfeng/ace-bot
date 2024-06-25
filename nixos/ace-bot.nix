@@ -91,7 +91,6 @@
     then "prepare-root"
     else "init";
   envInit = "${envToplevel}/${envInitName}";
-  diskPath = "/var/lib/ace-bot/mount/disk";
   nspawnSettingsBase = pkgs.writeText "ace-bot.nspawn.base" ''
     [Exec]
     Boot=no
@@ -102,7 +101,6 @@
     [Files]
     PrivateUsersOwnership=map
     BindUser=ace-bot
-    Bind=${diskPath}/nix:/nix:idmap
     BindReadOnly=${envToplevelClosureInfo}/registration:/nix/initial-registration:idmap
 
     [Network]
@@ -242,11 +240,13 @@ in {
       script = ''
         set -x
 
-        if [ ! -f toplevel ] ||
+        if [ ! -L toplevel ] ||
            [ "${envToplevel}" != "$(readlink toplevel)" ]; then
-          rm --force disk
-          rm --force toplevel
+          clean_store=1
+        else
+          clean_store=0
         fi
+        rm toplevel
         nix --experimental-features nix-command build "${envToplevel}" --out-link toplevel
 
         # setup disk
@@ -256,14 +256,19 @@ in {
         fi
         mkdir --parents mount/disk
         mount disk mount/disk
-        rm --recursive --force mount/disk/store/work
-        mkdir --parents mount/disk/nix
+        mount --make-shared mount/disk
         mkdir --parents mount/disk/home
+        mkdir --parents mount/disk/root
         chown --recursive ace-bot:ace-bot mount/disk/home
 
+        # clean up store
+        if [ "$clean_store" = "1" ]; then
+          rm --recursive --force mount/disk/root/nix
+        fi
+
         # setup image root
-        # just an empty directory
-        mkdir /var/lib/machines/ace-bot
+        mkdir --parents /var/lib/machines/ace-bot
+        mount --bind mount/disk/root /var/lib/machines/ace-bot
       '';
       postStop = ''
         set +e
@@ -274,6 +279,7 @@ in {
         if [ -f /var/lib/machines/ace-bot/reset ]; then
           rm disk
         fi
+        umount /var/lib/machines/ace-bot
         rm --recursive --force /var/lib/machines/ace-bot
       '';
       path =
