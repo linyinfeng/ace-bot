@@ -16,6 +16,7 @@
             ({modulesPath, ...}: {
               imports = [
                 "${modulesPath}/misc/nixpkgs/read-only.nix"
+                "${modulesPath}/profiles/minimal.nix"
               ];
               nixpkgs.pkgs = pkgs;
               system = {inherit (config.system) stateVersion;};
@@ -33,6 +34,8 @@
           networking.useDHCP = false;
           networking.useHostResolvConf = false;
           services.resolved.enable = true;
+          # does not work with read-only nixpkgs
+          environment.noXlibs = false;
         })
         ({
           config,
