@@ -34,7 +34,11 @@
           networking.useHostResolvConf = false;
           services.resolved.enable = true;
         })
-        ({config, pkgs, ...}: {
+        ({
+          config,
+          pkgs,
+          ...
+        }: {
           environment.systemPackages = [cfg.shell];
           nix.package = lib.mkDefault hostConfig.nix.package;
           systemd.services."setup-nix-db" = {
@@ -68,22 +72,24 @@
       ++ cfg.extraModules;
   };
   envToplevel = envConfiguration.config.system.build.toplevel;
-  envToplevelClosureInfo = pkgs.closureInfo { rootPaths = [ envToplevel ]; };
-  envToplevelState = pkgs.runCommand "toplevel-state" {
-    buildInputs = [
-      envToplevel
-    ];
-    nativeBuildInputs = with pkgs; [
-      nix
-    ];
-  } ''
-    mkdir -p "$out"
-    export NIX_STATE_DIR="$out"
-    nix-store --load-db <"${envToplevelClosureInfo}/registration"
-  '';
-  envInitName = if envConfiguration.config.boot.initrd.systemd.enable
-            then "prepare-root"
-            else "init";
+  envToplevelClosureInfo = pkgs.closureInfo {rootPaths = [envToplevel];};
+  envToplevelState =
+    pkgs.runCommand "toplevel-state" {
+      buildInputs = [
+        envToplevel
+      ];
+      nativeBuildInputs = with pkgs; [
+        nix
+      ];
+    } ''
+      mkdir -p "$out"
+      export NIX_STATE_DIR="$out"
+      nix-store --load-db <"${envToplevelClosureInfo}/registration"
+    '';
+  envInitName =
+    if envConfiguration.config.boot.initrd.systemd.enable
+    then "prepare-root"
+    else "init";
   envInit = "${envToplevel}/${envInitName}";
   diskPath = "/var/lib/ace-bot/mount/disk";
   nspawnSettingsBase = pkgs.writeText "ace-bot.nspawn.base" ''
@@ -101,7 +107,7 @@
 
     [Network]
   '';
-  nspawnSettings = pkgs.runCommand "ace-bot.nspawn" { } ''
+  nspawnSettings = pkgs.runCommand "ace-bot.nspawn" {} ''
     touch "$out"
     cp "${nspawnSettingsBase}" "$out"
     echo "[Files]" >>"$out"
@@ -270,10 +276,12 @@ in {
         fi
         rm --recursive --force /var/lib/machines/ace-bot
       '';
-      path = [ config.nix.package ] ++ (with pkgs; [
-        util-linux
-        e2fsprogs
-      ]);
+      path =
+        [config.nix.package]
+        ++ (with pkgs; [
+          util-linux
+          e2fsprogs
+        ]);
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -286,7 +294,11 @@ in {
       67 # DHCP server
     ];
     passthru = {
-      aceBot = { inherit envToplevelState; inherit envToplevelClosureInfo; inherit nspawnSettings; };
+      aceBot = {
+        inherit envToplevelState;
+        inherit envToplevelClosureInfo;
+        inherit nspawnSettings;
+      };
     };
   };
 }
