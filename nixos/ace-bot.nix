@@ -202,6 +202,12 @@ in {
       partOf = ["systemd-nspawn@ace-bot.service"];
       script = ''
         set -x
+        if [ ! -f toplevel ] ||
+           [ "${envConfiguration.config.system.build.toplevel}" != "$(cat toplevel)" ]; then
+          rm -rf disk
+        fi
+        echo "${envConfiguration.config.system.build.toplevel}" >toplevel
+
         # setup disk
         if [ ! -f disk ]; then
           fallocate --length "${cfg.disk.size}" disk
