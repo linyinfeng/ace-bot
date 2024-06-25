@@ -256,7 +256,6 @@ in {
         fi
         mkdir --parents mount/disk
         mount disk mount/disk
-        mount --make-shared mount/disk
         mkdir --parents mount/disk/home
         mkdir --parents mount/disk/root
         chown --recursive ace-bot:ace-bot mount/disk/home
