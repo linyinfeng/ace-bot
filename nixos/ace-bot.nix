@@ -5,6 +5,7 @@
   ...
 }: let
   cfg = config.services.ace-bot;
+  hostConfig = config;
   nixosSystem = args:
     import "${pkgs.path}/nixos/lib/eval-config.nix" ({
         inherit lib;
@@ -33,40 +34,23 @@
           networking.useHostResolvConf = false;
           services.resolved.enable = true;
         })
-        ({pkgs, ...}: {
+        ({config, pkgs, ...}: {
           environment.systemPackages = [cfg.shell];
-        })
-        ({pkgs, ...}: {
-          # store settings
-          nix.package = pkgs.nixVersions.latest; # for the local-overlay-store option
-          nix.settings = {
-            experimental-features = [
-              "local-overlay-store"
-              "read-only-local-store"
-            ];
-          };
-          systemd.services."setup-nix-store" = {
+          nix.package = lib.mkDefault hostConfig.nix.package;
+          systemd.services."setup-nix-db" = {
             script = ''
-              mount --types overlay overlay \
-                --options lowerdir=/mnt/store-host/nix/store \
-                --options upperdir=/mnt/store-disk/upper \
-                --options workdir=/mnt/store-disk/work \
-                --options userxattr \
-                /nix/store
-
-              mkdir --parents /root/.config/nix
-              # lower store: a read only chroot store in /mnt/store-host
-              cat >/root/.config/nix/nix.conf <<EOF
-              store = local-overlay://?real=/nix/store&state=/nix/var&lower-store=/mnt/store-host?read-only=true&upper-layer=/mnt/store-disk/upper
-              EOF
+              if [ ! -d /nix/var/nix/db ]; then
+                nix-store --load-db </nix/initial-registration
+              fi
             '';
-            path = with pkgs; [
-              util-linux
+            path = [
+              config.nix.package
             ];
             serviceConfig = {
               Type = "oneshot";
             };
-            wantedBy = ["local-fs.target"];
+            before = ["nix-daemon.service"];
+            wantedBy = ["multi-user.target"];
           };
         })
         ({pkgs, ...}: {
@@ -83,12 +67,61 @@
       ]
       ++ cfg.extraModules;
   };
+  envToplevel = envConfiguration.config.system.build.toplevel;
+  envToplevelClosureInfo = pkgs.closureInfo { rootPaths = [ envToplevel ]; };
+  envToplevelState = pkgs.runCommand "toplevel-state" {
+    buildInputs = [
+      envToplevel
+    ];
+    nativeBuildInputs = with pkgs; [
+      nix
+    ];
+  } ''
+    mkdir -p "$out"
+    export NIX_STATE_DIR="$out"
+    nix-store --load-db <"${envToplevelClosureInfo}/registration"
+  '';
+  envInitName = if envConfiguration.config.boot.initrd.systemd.enable
+            then "prepare-root"
+            else "init";
+  envInit = "${envToplevel}/${envInitName}";
+  diskPath = "/var/lib/ace-bot/mount/disk";
+  nspawnSettingsBase = pkgs.writeText "ace-bot.nspawn.base" ''
+    [Exec]
+    Boot=no
+    Parameters="${envInit}"
+    PrivateUsers=${toString cfg.privateUsers.uidBase}:${toString cfg.privateUsers.gidBase}
+    LinkJournal=host
+
+    [Files]
+    PrivateUsersOwnership=map
+    BindUser=ace-bot
+    Bind=${diskPath}/nix:/nix:idmap
+    BindReadOnly=${envToplevelClosureInfo}/registration:/nix/initial-registration:idmap
+
+    [Network]
+  '';
+  nspawnSettings = pkgs.runCommand "ace-bot.nspawn" { } ''
+    touch "$out"
+    cp "${nspawnSettingsBase}" "$out"
+    echo "[Files]" >>"$out"
+
+    IFS=$'\n'
+    for store_path in $(cat "${envToplevelClosureInfo}/store-paths"); do
+      echo "BindReadOnly=$store_path:$store_path:idmap" >>"$out"
+    done
+  '';
 in {
   options.services.ace-bot = {
     enable = lib.mkEnableOption "ace-bot";
     extraModules = lib.mkOption {
       type = with lib.types; listOf unspecified;
       default = [];
+    };
+    containerConfig = lib.mkOption {
+      type = with lib.types; unspecified;
+      readOnly = true;
+      default = envConfiguration;
     };
     disk = {
       size = lib.mkOption {
@@ -178,11 +211,11 @@ in {
     systemd.slices.acebot = {
       description = "ACE Bot Remote Codes";
       sliceConfig = {
-        CPUWeight = "idle";
-        CPUQuota = "50%";
-        MemoryMax = "1G";
-        MemorySwapMax = "2G";
-        LimitNProc = 2048;
+        CPUWeight = lib.mkDefault "idle";
+        CPUQuota = lib.mkDefault "50%";
+        MemoryMax = lib.mkDefault "1G";
+        MemorySwapMax = lib.mkDefault "2G";
+        LimitNProc = lib.mkDefault 10240;
       };
     };
     systemd.targets.machines.wants = ["systemd-nspawn@ace-bot.service"];
@@ -193,7 +226,7 @@ in {
         Slice = "acebot.slice";
       };
       restartTriggers = [
-        config.environment.etc."systemd/nspawn".source
+        nspawnSettings
       ];
     };
     systemd.services."ace-bot-image" = {
@@ -202,11 +235,13 @@ in {
       partOf = ["systemd-nspawn@ace-bot.service"];
       script = ''
         set -x
+
         if [ ! -f toplevel ] ||
-           [ "${envConfiguration.config.system.build.toplevel}" != "$(cat toplevel)" ]; then
-          rm -rf disk
+           [ "${envToplevel}" != "$(readlink toplevel)" ]; then
+          rm --force disk
+          rm --force toplevel
         fi
-        echo "${envConfiguration.config.system.build.toplevel}" >toplevel
+        nix --experimental-features nix-command build "${envToplevel}" --out-link toplevel
 
         # setup disk
         if [ ! -f disk ]; then
@@ -216,15 +251,13 @@ in {
         mkdir --parents mount/disk
         mount disk mount/disk
         rm --recursive --force mount/disk/store/work
-        mkdir --parents mount/disk/store/{upper,work,state}
+        mkdir --parents mount/disk/nix
         mkdir --parents mount/disk/home
         chown --recursive ace-bot:ace-bot mount/disk/home
 
-        # setup image
+        # setup image root
         # just an empty directory
         mkdir /var/lib/machines/ace-bot
-        # parents of mount points for overlay fs
-        mkdir /var/lib/machines/ace-bot/nix
       '';
       postStop = ''
         set +e
@@ -237,10 +270,10 @@ in {
         fi
         rm --recursive --force /var/lib/machines/ace-bot
       '';
-      path = with pkgs; [
+      path = [ config.nix.package ] ++ (with pkgs; [
         util-linux
         e2fsprogs
-      ];
+      ]);
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -248,37 +281,12 @@ in {
         WorkingDirectory = "/var/lib/ace-bot";
       };
     };
-    systemd.nspawn."ace-bot" = {
-      execConfig = {
-        Boot = false;
-        Parameters = let
-          initName =
-            if envConfiguration.config.boot.initrd.systemd.enable
-            then "prepare-root"
-            else "init";
-        in "${envConfiguration.config.system.build.toplevel}/${initName}";
-        PrivateUsers = "${toString cfg.privateUsers.uidBase}:${toString cfg.privateUsers.gidBase}";
-        LinkJournal = "host";
-      };
-      filesConfig = let
-        disk = "/var/lib/ace-bot/mount/disk";
-      in {
-        PrivateUsersOwnership = "map";
-        Bind = [
-          "${disk}/store/state:/nix/var:idmap"
-          "${disk}/store:/mnt/store-disk:idmap"
-        ];
-        BindReadOnly = [
-          "/nix:/mnt/store-host/nix:idmap,norbind"
-        ];
-        OverlayReadOnly = [
-          "+/mnt/store-host/nix/store:+/mnt/store-disk/upper:/nix/store"
-        ];
-        BindUser = ["ace-bot"];
-      };
-    };
+    environment.etc."systemd/nspawn/ace-bot.nspawn".source = nspawnSettings;
     networking.firewall.allowedUDPPorts = [
       67 # DHCP server
     ];
+    passthru = {
+      aceBot = { inherit envToplevelState; inherit envToplevelClosureInfo; inherit nspawnSettings; };
+    };
   };
 }
