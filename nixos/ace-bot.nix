@@ -301,6 +301,15 @@ in {
     networking.firewall.allowedUDPPorts = [
       67 # DHCP server
     ];
+    networking.nftables.tables.ace-bot = {
+      family = "inet";
+      content = ''
+        chain filter {
+          type filter hook prerouting priority filter; policy accept;
+          tcp dport { 22, 25 } iifname "ve-ace-bot" reject with icmpx admin-prohibited;
+        }
+      '';
+    };
     passthru = {
       aceBot = {
         inherit envToplevelState;
