@@ -45,6 +45,12 @@ struct Options {
 }
 
 static OPTIONS: Lazy<Options> = Lazy::new(Options::parse);
+static START_COMMAND_PATTER: Lazy<Regex> = Lazy::new(|| {
+    RegexBuilder::new("^(/start@[a-zA-Z_]+|/start)[[:space:]]*(.*)$")
+        .dot_matches_new_line(true)
+        .build()
+        .unwrap()
+});
 static USER_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
     RegexBuilder::new("^(/user@[a-zA-Z_]+|/user)[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
@@ -90,6 +96,10 @@ async fn handle_update(message: Message, bot: Bot) -> ResponseResult<()> {
                 Some(user) => {
                     let raw_text = &text_media.text;
                     log::debug!("{:?} raw: {}", user, raw_text);
+                    if START_COMMAND_PATTER.is_match(raw_text) {
+                        tokio::spawn(handle_start(message.clone(), bot.clone()));
+                        return Ok(());
+                    }
                     if RESET_COMMAND_PATTER.is_match(raw_text) {
                         tokio::spawn(handle_reset(message.clone(), bot.clone(), user.clone()));
                         return Ok(());
@@ -149,6 +159,12 @@ async fn handle_reset(message: Message, bot: Bot, user: User) {
     }
 }
 
+async fn handle_start(message: Message, bot: Bot) {
+    if let Err(e) = handle_start_result(message, bot).await {
+        log::warn!("request error: {}", e)
+    }
+}
+
 async fn handle_command_result(
     message: Message,
     bot: Bot,
@@ -192,6 +208,21 @@ async fn handle_reset_result(message: Message, bot: Bot, user: User) -> Response
             }
         }
     }
+    Ok(())
+}
+
+async fn handle_start_result(message: Message, bot: Bot) -> ResponseResult<()> {
+    let help_message = OutputMessage {
+        message: "hello, world
+```
+/user  - run bash commands as a normal user
+/root  - run bash commands as a root user
+/reset - reset the whole environment
+```"
+        .to_string(),
+        documents: vec![],
+    };
+    help_message.send(&bot, message.chat.id).await?;
     Ok(())
 }
 
