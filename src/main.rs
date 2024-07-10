@@ -95,15 +95,18 @@ async fn handle_update(message: Message, bot: Bot) -> ResponseResult<()> {
                         return Ok(());
                     }
 
-                    let mut mode = Mode::User;
-                    let cleaned = match USER_COMMAND_PATTERN.captures(raw_text) {
-                        Some(c) => c[2].to_string(),
+                    let (mode, cleaned) = match USER_COMMAND_PATTERN.captures(raw_text) {
+                        Some(c) => (Mode::User, c[2].to_string()),
                         None => match ROOT_COMMAND_PATTERN.captures(raw_text) {
-                            Some(c) => {
-                                mode = Mode::Root;
-                                c[2].to_string()
+                            Some(c) => (Mode::Root, c[2].to_string()),
+                            None => {
+                                if message.chat.id.is_user() {
+                                    (Mode::User, raw_text.to_string())
+                                } else {
+                                    log::debug!("ignored update: {:?}", message);
+                                    return Ok(());
+                                }
                             }
-                            None => raw_text.to_string(),
                         },
                     };
                     let bash_command = preprocessing(&cleaned);
