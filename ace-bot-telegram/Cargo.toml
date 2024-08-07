@@ -1,0 +1,17 @@
+[package]
+name = "ace-bot-telegram"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ace-bot = { path = "../ace-bot" }
+clap = { version = "*", features = [ "cargo", "derive" ] }
+tokio = { version = "*", features = [ "macros", "rt-multi-thread" ] }
+regex = "*"
+futures = "*"
+teloxide = { version = "*", features = [ "macros", "auto-send" ] }
+thiserror = "*"
+log = "*"
+pretty_env_logger = "*"
+once_cell = "*"
+reqwest = { version = "*", features = ["multipart"] }

@@ -51,6 +51,7 @@
         craneLib = inputs.crane.mkLib pkgs;
         src = craneLib.cleanCargoSource (craneLib.path ./.);
         bareCommonArgs = {
+          inherit (craneLib.crateNameFromCargoToml {src = ./ace-bot;}) pname version;
           inherit src;
           nativeBuildInputs = with pkgs; [
             pkg-config
@@ -59,15 +60,12 @@
             openssl
             sqlite
           ];
-          # TODO https://github.com/ipetkov/crane/issues/385
-          doNotLinkInheritedArtifacts = true;
         };
         cargoArtifacts = craneLib.buildDepsOnly bareCommonArgs;
         commonArgs = bareCommonArgs // {inherit cargoArtifacts;};
       in {
         packages = {
           ace-bot = craneLib.buildPackage commonArgs;
-          default = config.packages.ace-bot;
         };
         overlayAttrs = {
           inherit (config.packages) ace-bot;
@@ -75,7 +73,6 @@
         checks = {
           inherit (self'.packages) ace-bot;
           doc = craneLib.cargoDoc commonArgs;
-          fmt = craneLib.cargoFmt {inherit src;};
           nextest = craneLib.cargoNextest commonArgs;
           clippy = craneLib.cargoClippy (commonArgs
             // {

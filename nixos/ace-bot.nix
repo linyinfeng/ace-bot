@@ -118,6 +118,16 @@
       echo "BindReadOnly=$store_path:$store_path:idmap" >>"$out"
     done
   '';
+  commonBotOptions = ''
+    --shell="${lib.getExe cfg.shell}" \
+    --timeout="${cfg.timeout}" \
+    --machine="ace-bot" \
+    --reset-indicator="/var/lib/machines/ace-bot/reset" \
+    --machine-unit="systemd-nspawn@ace-bot.service" \
+    --user-mode-uid="ace-bot" \
+    --user-mode-gid="ace-bot" \
+    --user-home="/run/host/home/ace-bot" \
+    ${lib.escapeShellArgs cfg.extraOptions}'';
 in {
   options.services.ace-bot = {
     enable = lib.mkEnableOption "ace-bot";
@@ -136,10 +146,6 @@ in {
         default = "5GiB";
       };
     };
-    managerChatId = lib.mkOption {
-      type = with lib.types; nullOr str;
-      default = null;
-    };
     timeout = lib.mkOption {
       type = with lib.types; nullOr str;
       default = "60";
@@ -147,10 +153,6 @@ in {
     shell = lib.mkOption {
       type = with lib.types; package;
       default = pkgs.bashInteractive;
-    };
-    extraOptions = lib.mkOption {
-      type = with lib.types; listOf str;
-      default = [];
     };
     tokenFile = lib.mkOption {
       type = lib.types.path;
@@ -177,145 +179,157 @@ in {
         default = 7077888;
       };
     };
-  };
-  config = lib.mkIf (cfg.enable) {
-    users.users.ace-bot = {
-      isSystemUser = true;
-      home = "/var/lib/ace-bot/mount/disk/home";
-      shell = cfg.shell;
-      group = "ace-bot";
+    extraOptions = lib.mkOption {
+      type = with lib.types; listOf str;
+      default = [];
     };
-    users.groups.ace-bot = {};
-    systemd.services.ace-bot = {
-      script = ''
-        # setup token
-        export TELOXIDE_TOKEN=$(cat "$CREDENTIALS_DIRECTORY/token")
-        exec ${pkgs.ace-bot}/bin/ace-bot \
-          --shell="${lib.getExe cfg.shell}" \
-          --timeout="${cfg.timeout}" \
-          ${lib.optionalString (cfg.managerChatId != null) ''--manager-chat-id="${cfg.managerChatId}"''} \
-          --machine="ace-bot" \
-          --reset-indicator="/var/lib/machines/ace-bot/reset" \
-          --machine-unit="systemd-nspawn@ace-bot.service" \
-          --user-mode-uid="ace-bot" \
-          --user-mode-gid="ace-bot" \
-          --user-home="/run/host/home/ace-bot" \
-          ${lib.escapeShellArgs cfg.extraOptions}
-      '';
-      serviceConfig = {
-        LoadCredential = [
-          "token:${cfg.tokenFile}"
+    telegram = {
+      enable = lib.mkEnableOption "ace-bot-telegram";
+      managerChatId = lib.mkOption {
+        type = with lib.types; nullOr str;
+        default = null;
+      };
+      extraOptions = lib.mkOption {
+        type = with lib.types; listOf str;
+        default = [];
+      };
+    };
+  };
+  config = lib.mkIf (cfg.enable) (lib.mkMerge [
+    {
+      users.users.ace-bot = {
+        isSystemUser = true;
+        home = "/var/lib/ace-bot/mount/disk/home";
+        shell = cfg.shell;
+        group = "ace-bot";
+      };
+      users.groups.ace-bot = {};
+      systemd.slices.acebot = {
+        description = "ACE Bot Remote Codes";
+        sliceConfig = {
+          CPUWeight = lib.mkDefault "idle";
+          CPUQuota = lib.mkDefault "50%";
+          MemoryMax = lib.mkDefault "1G";
+          MemorySwapMax = lib.mkDefault "2G";
+          LimitNProc = lib.mkDefault 10240;
+        };
+      };
+      systemd.targets.machines.wants = ["systemd-nspawn@ace-bot.service"];
+      systemd.services."systemd-nspawn@ace-bot" = {
+        overrideStrategy = "asDropin";
+        serviceConfig = {
+          Restart = "always";
+          Slice = "acebot.slice";
+        };
+        restartTriggers = [
+          nspawnSettings
         ];
-        StateDirectory = "ace-bot";
-        WorkingDirectory = "/var/lib/ace-bot";
-        Restart = "always";
       };
-      environment = {
-        "RUST_LOG" = cfg.rustLog;
+      systemd.services."ace-bot-image" = {
+        wantedBy = ["systemd-nspawn@ace-bot.service"];
+        before = ["systemd-nspawn@ace-bot.service"];
+        partOf = ["systemd-nspawn@ace-bot.service"];
+        script = ''
+          set -x
+
+          if [ ! -L toplevel ] ||
+            [ "${envToplevel}" != "$(readlink toplevel)" ]; then
+            clean_store=1
+          else
+            clean_store=0
+          fi
+          rm toplevel
+          nix --experimental-features nix-command build "${envToplevel}" --out-link toplevel
+
+          # setup disk
+          if [ ! -f disk ]; then
+            fallocate --length "${cfg.disk.size}" disk
+            mkfs.ext4 disk
+          fi
+          mkdir --parents mount/disk
+          mount disk mount/disk
+          mkdir --parents mount/disk/home
+          mkdir --parents mount/disk/root
+          chown --recursive ace-bot:ace-bot mount/disk/home
+
+          # clean up store
+          if [ "$clean_store" = "1" ]; then
+            rm --recursive --force mount/disk/root/nix
+          fi
+
+          # setup image root
+          mkdir --parents /var/lib/machines/ace-bot
+          mount --bind mount/disk/root /var/lib/machines/ace-bot
+        '';
+        postStop = ''
+          set +e
+          set -x
+          umount mount/disk
+          rmdir mount/disk
+          rmdir mount
+          if [ -f /var/lib/machines/ace-bot/reset ]; then
+            rm disk
+          fi
+          umount /var/lib/machines/ace-bot
+          rm --recursive --force /var/lib/machines/ace-bot
+        '';
+        path =
+          [config.nix.package]
+          ++ (with pkgs; [
+            util-linux
+            e2fsprogs
+          ]);
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          StateDirectory = "ace-bot";
+          WorkingDirectory = "/var/lib/ace-bot";
+        };
       };
-      wantedBy = ["multi-user.target"];
-    };
-    systemd.slices.acebot = {
-      description = "ACE Bot Remote Codes";
-      sliceConfig = {
-        CPUWeight = lib.mkDefault "idle";
-        CPUQuota = lib.mkDefault "50%";
-        MemoryMax = lib.mkDefault "1G";
-        MemorySwapMax = lib.mkDefault "2G";
-        LimitNProc = lib.mkDefault 10240;
-      };
-    };
-    systemd.targets.machines.wants = ["systemd-nspawn@ace-bot.service"];
-    systemd.services."systemd-nspawn@ace-bot" = {
-      overrideStrategy = "asDropin";
-      serviceConfig = {
-        Restart = "always";
-        Slice = "acebot.slice";
-      };
-      restartTriggers = [
-        nspawnSettings
+      environment.etc."systemd/nspawn/ace-bot.nspawn".source = nspawnSettings;
+      networking.firewall.allowedUDPPorts = [
+        67 # DHCP server
       ];
-    };
-    systemd.services."ace-bot-image" = {
-      wantedBy = ["systemd-nspawn@ace-bot.service"];
-      before = ["systemd-nspawn@ace-bot.service"];
-      partOf = ["systemd-nspawn@ace-bot.service"];
-      script = ''
-        set -x
-
-        if [ ! -L toplevel ] ||
-           [ "${envToplevel}" != "$(readlink toplevel)" ]; then
-          clean_store=1
-        else
-          clean_store=0
-        fi
-        rm toplevel
-        nix --experimental-features nix-command build "${envToplevel}" --out-link toplevel
-
-        # setup disk
-        if [ ! -f disk ]; then
-          fallocate --length "${cfg.disk.size}" disk
-          mkfs.ext4 disk
-        fi
-        mkdir --parents mount/disk
-        mount disk mount/disk
-        mkdir --parents mount/disk/home
-        mkdir --parents mount/disk/root
-        chown --recursive ace-bot:ace-bot mount/disk/home
-
-        # clean up store
-        if [ "$clean_store" = "1" ]; then
-          rm --recursive --force mount/disk/root/nix
-        fi
-
-        # setup image root
-        mkdir --parents /var/lib/machines/ace-bot
-        mount --bind mount/disk/root /var/lib/machines/ace-bot
-      '';
-      postStop = ''
-        set +e
-        set -x
-        umount mount/disk
-        rmdir mount/disk
-        rmdir mount
-        if [ -f /var/lib/machines/ace-bot/reset ]; then
-          rm disk
-        fi
-        umount /var/lib/machines/ace-bot
-        rm --recursive --force /var/lib/machines/ace-bot
-      '';
-      path =
-        [config.nix.package]
-        ++ (with pkgs; [
-          util-linux
-          e2fsprogs
-        ]);
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        StateDirectory = "ace-bot";
-        WorkingDirectory = "/var/lib/ace-bot";
+      networking.nftables.tables.ace-bot = {
+        family = "inet";
+        content = ''
+          chain filter {
+            type filter hook prerouting priority filter; policy accept;
+            tcp dport { 22, 25 } iifname "ve-ace-bot" reject with icmpx admin-prohibited;
+          }
+        '';
       };
-    };
-    environment.etc."systemd/nspawn/ace-bot.nspawn".source = nspawnSettings;
-    networking.firewall.allowedUDPPorts = [
-      67 # DHCP server
-    ];
-    networking.nftables.tables.ace-bot = {
-      family = "inet";
-      content = ''
-        chain filter {
-          type filter hook prerouting priority filter; policy accept;
-          tcp dport { 22, 25 } iifname "ve-ace-bot" reject with icmpx admin-prohibited;
-        }
-      '';
-    };
-    passthru = {
-      aceBot = {
-        inherit envToplevelState;
-        inherit envToplevelClosureInfo;
-        inherit nspawnSettings;
+      passthru = {
+        aceBot = {
+          inherit envToplevelState;
+          inherit envToplevelClosureInfo;
+          inherit nspawnSettings;
+        };
       };
-    };
-  };
+    }
+    (lib.mkIf cfg.telegram.enable {
+      systemd.services.ace-bot-telegram = {
+        script = ''
+          # setup token
+          export TELOXIDE_TOKEN=$(cat "$CREDENTIALS_DIRECTORY/token")
+          exec ${pkgs.ace-bot}/bin/ace-bot-telegram \
+            ${commonBotOptions} \
+            ${lib.optionalString (cfg.telegram.managerChatId != null) ''--manager-chat-id="${cfg.telegram.managerChatId}"''} \
+            ${lib.escapeShellArgs cfg.telegram.extraOptions}
+        '';
+        serviceConfig = {
+          LoadCredential = [
+            "token:${cfg.tokenFile}"
+          ];
+          StateDirectory = "ace-bot";
+          WorkingDirectory = "/var/lib/ace-bot";
+          Restart = "always";
+        };
+        environment = {
+          "RUST_LOG" = cfg.rustLog;
+        };
+        wantedBy = ["multi-user.target"];
+      };
+    })
+  ]);
 }
