@@ -120,7 +120,7 @@
     --shell="${lib.getExe cfg.shell}" \
     --timeout="${cfg.timeout}" \
     --machine="ace-bot" \
-    --reset-indicator="/var/lib/machines/ace-bot/reset" \
+    --reset-indicator="/var/lib/ace-bot/reset" \
     --machine-unit="systemd-nspawn@ace-bot.service" \
     --user-mode-uid="ace-bot" \
     --user-mode-gid="ace-bot" \
@@ -245,7 +245,7 @@ in {
             mkfs.ext4 disk
           fi
           mkdir --parents mount/disk
-          mount disk mount/disk
+          mount disk mount/disk --options loop
           mkdir --parents mount/disk/home
           mkdir --parents mount/disk/root
           chown --recursive ace-bot:ace-bot mount/disk/home
@@ -262,14 +262,17 @@ in {
         postStop = ''
           set +e
           set -x
-          umount mount/disk
-          rmdir mount/disk
-          rmdir mount
-          if [ -f /var/lib/machines/ace-bot/reset ]; then
-            rm disk
-          fi
           umount /var/lib/machines/ace-bot
           rm --recursive --force /var/lib/machines/ace-bot
+
+          umount mount/disk || umount --lazy mount/disk
+          rmdir mount/disk
+          rmdir mount
+
+          if [ -f reset ]; then
+            rm disk
+            rm reset
+          fi
         '';
         path =
           [config.nix.package]
