@@ -72,7 +72,12 @@
         checks = {
           inherit (self'.packages) ace-bot;
           doc = craneLib.cargoDoc commonArgs;
-          nextest = craneLib.cargoNextest commonArgs;
+          nextest = craneLib.cargoNextest (
+            commonArgs
+            // {
+              cargoNextestExtraArgs = lib.escapeShellArgs ["--no-tests=warn"];
+            }
+          );
           clippy = craneLib.cargoClippy (commonArgs
             // {
               cargoClippyExtraArgs = "--all-targets -- --deny warnings";
