@@ -1,8 +1,8 @@
-use ace_bot::pastebin;
-use ace_bot::pastebin::curl_command;
 use ace_bot::AceBot;
 use ace_bot::AceError;
 use ace_bot::Mode;
+use ace_bot::pastebin;
+use ace_bot::pastebin::curl_command;
 use clap::Parser;
 
 use futures::future::FutureExt;
@@ -13,11 +13,11 @@ use std::fmt::Display;
 use std::ops::Deref;
 use std::process::Output;
 use std::sync::Arc;
+use teloxide::RequestError;
 use teloxide::types::InputFile;
 use teloxide::types::InputMedia;
 use teloxide::types::InputMediaDocument;
 use teloxide::types::{ParseMode, User};
-use teloxide::RequestError;
 use teloxide::{
     prelude::*,
     requests::ResponseResult,
