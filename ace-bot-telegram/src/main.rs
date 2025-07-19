@@ -108,7 +108,7 @@ async fn run() {
     pretty_env_logger::init();
     log::info!("Starting ace-bot...");
     let options = FullOptions::parse();
-    log::info!("Options = {:#?}", options);
+    log::info!("Options = {options:#?}");
     let ctx = ArcContext(Arc::new(Context::new(options)));
     let bot = Bot::from_env();
     Dispatcher::builder(bot, Update::filter_message().endpoint(handle_update))
@@ -124,7 +124,7 @@ async fn handle_update(ctx: ArcContext, message: Message, bot: Bot) -> Result<()
             MediaKind::Text(text_media) => match &common_msg.from {
                 Some(user) => {
                     let raw_text = &text_media.text;
-                    log::debug!("{:?} raw: {}", user, raw_text);
+                    log::debug!("{user:?} raw: {raw_text}");
                     if START_COMMAND_PATTER.is_match(raw_text) {
                         tokio::spawn(
                             ctx.handle_start(message.clone(), bot.clone())
@@ -148,7 +148,7 @@ async fn handle_update(ctx: ArcContext, message: Message, bot: Bot) -> Result<()
                                 if message.chat.id.is_user() {
                                     (Mode::NonRoot, raw_text.to_string())
                                 } else {
-                                    log::debug!("ignored update: {:?}", message);
+                                    log::debug!("ignored update: {message:?}");
                                     return Ok(());
                                 }
                             }
@@ -156,17 +156,17 @@ async fn handle_update(ctx: ArcContext, message: Message, bot: Bot) -> Result<()
                     };
                     let bash_command = preprocessing(&cleaned);
 
-                    log::info!("{:?} ({:?}): {}", user, mode, bash_command);
+                    log::info!("{user:?} ({mode:?}): {bash_command}");
                     tokio::spawn(
                         ctx.handle_command(message.clone(), bot, user.clone(), mode, bash_command)
                             .map(log_error),
                     );
                 }
-                _ => log::debug!("ignored update: {:?}", message),
+                _ => log::debug!("ignored update: {message:?}"),
             },
-            _ => log::debug!("ignored update: {:?}", message),
+            _ => log::debug!("ignored update: {message:?}"),
         },
-        _ => log::debug!("ignored update: {:?}", message),
+        _ => log::debug!("ignored update: {message:?}"),
     }
     Ok(())
 }
@@ -181,7 +181,7 @@ fn preprocessing(raw: &str) -> String {
 
 fn log_error<E: Display>(r: Result<(), E>) {
     if let Err(e) = r {
-        log::warn!("error: {}", e)
+        log::warn!("error: {e}")
     }
 }
 
@@ -271,7 +271,7 @@ impl OutputMessage {
 
         message.push_str(&utils::markdown::escape(&user));
         if let Some(m) = mode {
-            message.push_str(&utils::markdown::escape(&format!(" ({})", m)));
+            message.push_str(&utils::markdown::escape(&format!(" ({m})")));
         } else {
             message.push_str(&utils::markdown::escape(" (meta)"));
         }
@@ -353,7 +353,7 @@ impl OutputMessage {
 
 fn user_indicator(user: &User) -> String {
     if let Some(s) = &user.username {
-        return format!("@{}", s);
+        return format!("@{s}");
     }
     user.first_name.to_string()
 }
@@ -364,7 +364,7 @@ pub async fn report_ace_error(
     bot: &Bot,
 ) -> Result<(), teloxide::RequestError> {
     log::warn!("report error to chat {}: {:?}", msg.chat.id, err);
-    bot.send_message(msg.chat.id, format!("{}", err))
+    bot.send_message(msg.chat.id, format!("{err}"))
         .reply_to_message_id(msg.id)
         .await?;
     Ok(())
