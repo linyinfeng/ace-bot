@@ -82,7 +82,8 @@ let
           };
         }
       )
-    ] ++ cfg.extraModules;
+    ]
+    ++ cfg.extraModules;
   };
   envToplevel = envConfiguration.config.system.build.toplevel;
   envToplevelClosureInfo = pkgs.closureInfo { rootPaths = [ envToplevel ]; };
@@ -289,12 +290,13 @@ in
               rm reset
             fi
           '';
-          path =
-            [ config.nix.package ]
-            ++ (with pkgs; [
-              util-linux
-              e2fsprogs
-            ]);
+          path = [
+            config.nix.package
+          ]
+          ++ (with pkgs; [
+            util-linux
+            e2fsprogs
+          ]);
           serviceConfig = {
             Type = "oneshot";
             RemainAfterExit = true;
