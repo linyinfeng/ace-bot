@@ -42,11 +42,11 @@ struct Context {
 }
 
 impl Context {
-    fn new(options: FullOptions) -> Self {
-        Self {
-            ace: AceBot::new(options.ace),
+    fn new(options: FullOptions) -> Result<Self, Error> {
+        Ok(Self {
+            ace: AceBot::new(options.ace)?,
             options: options.tg,
-        }
+        })
     }
 }
 
@@ -92,8 +92,14 @@ static ROOT_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
         .build()
         .unwrap()
 });
-static RESET_COMMAND_PATTER: Lazy<Regex> = Lazy::new(|| {
+static RESET_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
     RegexBuilder::new("^(/reset@[a-zA-Z_]+|/reset)[[:space:]]*(.*)$")
+        .dot_matches_new_line(true)
+        .build()
+        .unwrap()
+});
+static NIX_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    RegexBuilder::new("^(/nix@[a-zA-Z_]+|/nix)[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
         .build()
         .unwrap()
@@ -109,7 +115,7 @@ async fn run() {
     log::info!("Starting ace-bot...");
     let options = FullOptions::parse();
     log::info!("Options = {options:#?}");
-    let ctx = ArcContext(Arc::new(Context::new(options)));
+    let ctx = ArcContext(Arc::new(Context::new(options).unwrap()));
     let bot = Bot::from_env();
     Dispatcher::builder(bot, Update::filter_message().endpoint(handle_update))
         .dependencies(dptree::deps![ctx])
@@ -132,33 +138,33 @@ async fn handle_update(ctx: ArcContext, message: Message, bot: Bot) -> Result<()
                         );
                         return Ok(());
                     }
-                    if RESET_COMMAND_PATTER.is_match(raw_text) {
+                    if RESET_COMMAND_PATTERN.is_match(raw_text) {
                         tokio::spawn(
                             ctx.handle_reset(message.clone(), bot.clone(), user.clone())
                                 .map(log_error),
                         );
                         return Ok(());
                     }
-
-                    let (mode, cleaned) = match USER_COMMAND_PATTERN.captures(raw_text) {
-                        Some(c) => (Mode::NonRoot, c[2].to_string()),
-                        None => match ROOT_COMMAND_PATTERN.captures(raw_text) {
-                            Some(c) => (Mode::Root, c[2].to_string()),
-                            None => {
-                                if message.chat.id.is_user() {
-                                    (Mode::NonRoot, raw_text.to_string())
-                                } else {
-                                    log::debug!("ignored update: {message:?}");
-                                    return Ok(());
-                                }
-                            }
-                        },
-                    };
-                    let bash_command = preprocessing(&cleaned);
-
-                    log::info!("{user:?} ({mode:?}): {bash_command}");
+                    let mode;
+                    let command;
+                    if let Some(c) = NIX_COMMAND_PATTERN.captures(raw_text) {
+                        mode = Mode::Nix;
+                        command = c[2].to_string();
+                    } else if let Some(c) = ROOT_COMMAND_PATTERN.captures(raw_text) {
+                        mode = Mode::Root;
+                        command = preprocessing(&c[2]);
+                    } else if let Some(c) = USER_COMMAND_PATTERN.captures(raw_text) {
+                        mode = Mode::NonRoot;
+                        command = preprocessing(&c[2]);
+                    } else if message.chat.id.is_user() {
+                        mode = Mode::NonRoot;
+                        command = preprocessing(raw_text);
+                    } else {
+                        log::debug!("ignored update: {message:?}");
+                        return Ok(());
+                    }
                     tokio::spawn(
-                        ctx.handle_command(message.clone(), bot, user.clone(), mode, bash_command)
+                        ctx.handle_command(message.clone(), bot, user.clone(), mode, command)
                             .map(log_error),
                     );
                 }
@@ -192,20 +198,20 @@ impl ArcContext {
         bot: Bot,
         user: User,
         mode: Mode,
-        bash_command: String,
+        command: String,
     ) -> ResponseResult<()> {
-        match self.ace.run(mode, &bash_command).await {
+        match self.ace.run(mode, &command).await {
             Err(e) => {
                 report_ace_error(&e, &message, &bot).await?;
             }
             Ok(output) => {
                 let output_message =
-                    OutputMessage::format(&user, Some(mode), &bash_command, output).await;
+                    OutputMessage::format(&user, Some(mode), &command, output).await;
                 output_message.send(&bot, message.chat.id).await?;
-                if let Some(id) = self.options.manager_chat_id {
-                    if ChatId(id) != message.chat.id {
-                        output_message.send(&bot, ChatId(id)).await?;
-                    }
+                if let Some(id) = self.options.manager_chat_id
+                    && ChatId(id) != message.chat.id
+                {
+                    output_message.send(&bot, ChatId(id)).await?;
                 };
             }
         }
@@ -287,11 +293,11 @@ impl OutputMessage {
         if !output.stdout.is_empty() {
             message.push_str(&format!("\n{}", utils::markdown::escape("(stdout)")));
             let mut inlined = false;
-            if let Ok(s) = String::from_utf8(output.stdout.clone()) {
-                if s.len() < PART_LIMIT {
-                    inlined = true;
-                    message.push_str(&format!("\n{}", utils::markdown::code_block(&s)));
-                }
+            if let Ok(s) = String::from_utf8(output.stdout.clone())
+                && s.len() < PART_LIMIT
+            {
+                inlined = true;
+                message.push_str(&format!("\n{}", utils::markdown::code_block(&s)));
             }
             if !inlined {
                 if output.stdout.len() < FILE_LIMIT {
@@ -313,11 +319,11 @@ impl OutputMessage {
         if !output.stderr.is_empty() {
             message.push_str(&format!("\n{}", utils::markdown::escape("(stderr)")));
             let mut inlined = false;
-            if let Ok(s) = String::from_utf8(output.stderr.clone()) {
-                if s.len() < PART_LIMIT {
-                    inlined = true;
-                    message.push_str(&format!("\n{}", utils::markdown::code_block(&s)));
-                }
+            if let Ok(s) = String::from_utf8(output.stderr.clone())
+                && s.len() < PART_LIMIT
+            {
+                inlined = true;
+                message.push_str(&format!("\n{}", utils::markdown::code_block(&s)));
             }
             if !inlined {
                 if output.stderr.len() < FILE_LIMIT {

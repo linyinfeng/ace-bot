@@ -134,9 +134,10 @@ let
     --machine="ace-bot" \
     --reset-indicator="/var/lib/ace-bot/reset" \
     --machine-unit="systemd-nspawn@ace-bot.service" \
-    --user-mode-uid="ace-bot" \
-    --user-mode-gid="ace-bot" \
-    --user-home="/run/host/home/ace-bot" \
+    --user-mode-user="ace-bot" \
+    --user-mode-group="ace-bot" \
+    --user-guest-home="/run/host/home/ace-bot" \
+    --user-host-home="${config.users.users.ace-bot.home}" \
     ${lib.escapeShellArgs cfg.extraOptions}'';
 in
 {

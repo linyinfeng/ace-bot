@@ -12,3 +12,5 @@ log = "*"
 thiserror = "*"
 reqwest = { version = "*", features = ["multipart"] }
 maplit = "*"
+mktemp = "*"
+users = "*"
