@@ -5,13 +5,14 @@ edition = "2024"
 
 [dependencies]
 ace-bot = { path = "../ace-bot" }
-clap = { version = "*", features = [ "cargo", "derive" ] }
-tokio = { version = "*", features = [ "macros", "rt-multi-thread" ] }
-regex = "*"
-futures = "*"
-teloxide = { version = "*", features = [ "macros", "auto-send" ] }
-thiserror = "*"
-log = "*"
-pretty_env_logger = "*"
-once_cell = "*"
-reqwest = { version = "*", features = ["multipart"] }
+teloxide.workspace = true
+clap.workspace = true
+tokio.workspace = true
+regex.workspace = true
+futures.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+log.workspace = true
+tracing-subscriber.workspace = true
+once_cell.workspace = true
+reqwest.workspace = true

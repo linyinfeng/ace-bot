@@ -6,3 +6,19 @@ members = [
     "ace-bot-telegram",
     "ace-bot-matrix",
 ]
+
+[workspace.dependencies]
+clap = { version = "*", features = [ "cargo", "derive", "env" ] }
+tokio = { version = "*", features = [ "macros", "rt-multi-thread", "process", "fs" ] }
+regex = "*"
+futures = "*"
+anyhow = "*"
+thiserror = "*"
+log = "*"
+tracing-subscriber = "*"
+pretty_env_logger = "*"
+once_cell = "*"
+reqwest = { version = "*", features = ["multipart"] }
+
+teloxide = { version = "*", features = [ "macros", "auto-send" ] }
+matrix-sdk = ">=0.13.0"

@@ -5,3 +5,13 @@ edition = "2024"
 
 [dependencies]
 ace-bot = { path = "../ace-bot" }
+matrix-sdk.workspace = true
+clap.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true
+log.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+futures.workspace = true

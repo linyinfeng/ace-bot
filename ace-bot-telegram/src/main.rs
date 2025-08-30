@@ -4,15 +4,13 @@ use ace_bot::Mode;
 use ace_bot::pastebin;
 use ace_bot::pastebin::curl_command;
 use clap::Parser;
-
 use futures::future::FutureExt;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use regex::RegexBuilder;
 use std::fmt::Display;
 use std::ops::Deref;
 use std::process::Output;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use teloxide::RequestError;
 use teloxide::types::InputFile;
 use teloxide::types::InputMedia;
@@ -62,7 +60,7 @@ struct FullOptions {
 #[derive(Clone, Debug, Parser)]
 #[command(author, version, about)]
 struct TgOptions {
-    #[arg(short, long)]
+    #[arg(long)]
     pub manager_chat_id: Option<i64>,
 }
 
@@ -74,31 +72,31 @@ pub enum Error {
     Teloxide(#[from] RequestError),
 }
 
-static START_COMMAND_PATTER: Lazy<Regex> = Lazy::new(|| {
+static START_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     RegexBuilder::new("^(/start@[a-zA-Z_]+|/start)[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
         .build()
         .unwrap()
 });
-static USER_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
+static USER_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     RegexBuilder::new("^(/user@[a-zA-Z_]+|/user)[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
         .build()
         .unwrap()
 });
-static ROOT_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
+static ROOT_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     RegexBuilder::new("^(/root@[a-zA-Z_]+|/root)[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
         .build()
         .unwrap()
 });
-static RESET_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
+static RESET_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     RegexBuilder::new("^(/reset@[a-zA-Z_]+|/reset)[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
         .build()
         .unwrap()
 });
-static NIX_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
+static NIX_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     RegexBuilder::new("^(/nix@[a-zA-Z_]+|/nix)[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
         .build()
@@ -106,22 +104,23 @@ static NIX_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
 });
 
 #[tokio::main]
-async fn main() {
-    run().await;
+async fn main() -> anyhow::Result<()> {
+    run().await
 }
 
-async fn run() {
-    pretty_env_logger::init();
+async fn run() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
     log::info!("Starting ace-bot...");
     let options = FullOptions::parse();
     log::info!("Options = {options:#?}");
-    let ctx = ArcContext(Arc::new(Context::new(options).unwrap()));
+    let ctx = ArcContext(Arc::new(Context::new(options)?));
     let bot = Bot::from_env();
     Dispatcher::builder(bot, Update::filter_message().endpoint(handle_update))
         .dependencies(dptree::deps![ctx])
         .build()
         .dispatch()
         .await;
+    Ok(())
 }
 
 async fn handle_update(ctx: ArcContext, message: Message, bot: Bot) -> Result<(), ()> {
@@ -131,7 +130,7 @@ async fn handle_update(ctx: ArcContext, message: Message, bot: Bot) -> Result<()
                 Some(user) => {
                     let raw_text = &text_media.text;
                     log::debug!("{user:?} raw: {raw_text}");
-                    if START_COMMAND_PATTER.is_match(raw_text) {
+                    if START_COMMAND_PATTERN.is_match(raw_text) {
                         tokio::spawn(
                             ctx.handle_start(message.clone(), bot.clone())
                                 .map(log_error),
@@ -201,40 +200,37 @@ impl ArcContext {
         command: String,
     ) -> ResponseResult<()> {
         match self.ace.run(mode, &command).await {
-            Err(e) => {
-                report_ace_error(&e, &message, &bot).await?;
-            }
+            Err(e) => report_ace_error(&e, &message, &bot).await,
             Ok(output) => {
                 let output_message =
                     OutputMessage::format(&user, Some(mode), &command, output).await;
-                output_message.send(&bot, message.chat.id).await?;
-                if let Some(id) = self.options.manager_chat_id
-                    && ChatId(id) != message.chat.id
-                {
-                    output_message.send(&bot, ChatId(id)).await?;
-                };
+                self.handle_output(message, bot, output_message).await
             }
         }
-        Ok(())
     }
 
     async fn handle_reset(self, message: Message, bot: Bot, user: User) -> ResponseResult<()> {
         match self.ace.reset().await {
-            Err(e) => {
-                report_ace_error(&e, &message, &bot).await?;
-            }
+            Err(e) => report_ace_error(&e, &message, &bot).await,
             Ok(output) => {
                 let output_message = OutputMessage::format(&user, None, "/reset", output).await;
-                let manager_id = match self.options.manager_chat_id {
-                    Some(id) => ChatId(id),
-                    None => return Ok(()),
-                };
-                output_message.send(&bot, message.chat.id).await?;
-                if manager_id != message.chat.id {
-                    output_message.send(&bot, manager_id).await?;
-                }
+                self.handle_output(message, bot, output_message).await
             }
         }
+    }
+
+    async fn handle_output(
+        self,
+        message: Message,
+        bot: Bot,
+        output: OutputMessage,
+    ) -> ResponseResult<()> {
+        output.send(&bot, message.chat.id).await?;
+        if let Some(id) = self.options.manager_chat_id
+            && ChatId(id) != message.chat.id
+        {
+            output.send(&bot, ChatId(id)).await?;
+        };
         Ok(())
     }
 

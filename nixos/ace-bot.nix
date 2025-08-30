@@ -166,9 +166,6 @@ in
       type = with lib.types; package;
       default = pkgs.bashInteractive;
     };
-    tokenFile = lib.mkOption {
-      type = lib.types.path;
-    };
     rustLog = lib.mkOption {
       type = lib.types.str;
       default = "info";
@@ -206,6 +203,28 @@ in
       extraOptions = lib.mkOption {
         type = with lib.types; listOf str;
         default = [ ];
+      };
+      tokenFile = lib.mkOption {
+        type = lib.types.path;
+      };
+    };
+    matrix = {
+      enable = lib.mkEnableOption "ace-bot-matrix";
+      homeServerUrl = lib.mkOption {
+        type = lib.types.str;
+      };
+      userName = lib.mkOption {
+        type = lib.types.str;
+      };
+      managerRoom = lib.mkOption {
+        type = with lib.types; nullOr str;
+      };
+      extraOptions = lib.mkOption {
+        type = with lib.types; listOf str;
+        default = [ ];
+      };
+      passwordFile = lib.mkOption {
+        type = lib.types.path;
       };
     };
   };
@@ -342,7 +361,35 @@ in
           '';
           serviceConfig = {
             LoadCredential = [
-              "token:${cfg.tokenFile}"
+              "token:${cfg.telegram.tokenFile}"
+            ];
+            StateDirectory = "ace-bot";
+            WorkingDirectory = "/var/lib/ace-bot";
+            Restart = "always";
+          };
+          environment = {
+            "RUST_LOG" = cfg.rustLog;
+          };
+          wantedBy = [ "multi-user.target" ];
+        };
+      })
+      (lib.mkIf cfg.matrix.enable {
+        systemd.services.ace-bot-matrix = {
+          script = ''
+            # setup password
+            export ACE_BOT_MATRIX_PASSWORD=$(cat "$CREDENTIALS_DIRECTORY/password")
+            exec ${pkgs.ace-bot}/bin/ace-bot-matrix \
+              ${commonBotOptions} \
+              --home-server-url="${cfg.matrix.homeServerUrl}" \
+              --username="${cfg.matrix.userName}" \
+              ${
+                lib.optionalString (cfg.matrix.managerRoom != null) ''--manager-room="${cfg.matrix.managerRoom}"''
+              } \
+              ${lib.escapeShellArgs cfg.matrix.extraOptions}
+          '';
+          serviceConfig = {
+            LoadCredential = [
+              "password:${cfg.matrix.passwordFile}"
             ];
             StateDirectory = "ace-bot";
             WorkingDirectory = "/var/lib/ace-bot";
