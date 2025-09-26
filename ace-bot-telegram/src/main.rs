@@ -16,6 +16,7 @@ use teloxide::types::InputFile;
 use teloxide::types::InputMedia;
 use teloxide::types::InputMediaDocument;
 use teloxide::types::{ParseMode, User};
+use teloxide::utils::markdown;
 use teloxide::{
     prelude::*,
     requests::ResponseResult,
@@ -263,7 +264,11 @@ impl OutputMessage {
         command: &str,
         output: Output,
     ) -> OutputMessage {
-        let user = user_indicator(user);
+        // TODO wait for https://github.com/teloxide/teloxide/pull/1411
+        let user = match user.mention() {
+            Some(mention) => markdown::escape(&mention),
+            None => markdown::link(user.url().as_str(), &markdown::escape(&user.full_name())),
+        };
         const PART_LIMIT: usize = 1000;
         const FILE_LIMIT: usize = 1024 * 1024; // 1 MiB
 
@@ -271,7 +276,7 @@ impl OutputMessage {
         let mut documents = Vec::new();
         let client = reqwest::Client::new();
 
-        message.push_str(&utils::markdown::escape(&user));
+        message.push_str(&user);
         if let Some(m) = mode {
             message.push_str(&utils::markdown::escape(&format!(" ({m})")));
         } else {
@@ -351,13 +356,6 @@ impl OutputMessage {
         }
         Ok(())
     }
-}
-
-fn user_indicator(user: &User) -> String {
-    if let Some(s) = &user.username {
-        return format!("@{s}");
-    }
-    user.first_name.to_string()
 }
 
 pub async fn report_ace_error(
