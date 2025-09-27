@@ -13,18 +13,19 @@ use matrix_sdk::{
     room::reply::{EnforceThread, Reply, ReplyError},
     ruma::{
         OwnedRoomId, OwnedUserId,
-        events::room::message::{
+        events::room::{member::StrippedRoomMemberEvent, message::{
             MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent,
             RoomMessageEventContentWithoutRelation,
-        },
+        }},
     },
 };
 use regex::{Regex, RegexBuilder};
+use tokio::time::sleep;
 use std::{
     fmt::Display,
     ops::Deref,
     process::Output,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock}, time::Duration,
 };
 
 #[derive(Debug, Clone)]
@@ -147,6 +148,7 @@ impl ArcContext {
         let response = client.sync_once(SyncSettings::default()).await?;
         client.add_event_handler_context(self.clone());
         client.add_event_handler(Self::on_room_message);
+        client.add_event_handler(Self::on_stripped_state_member);
         let settings = SyncSettings::default().token(response.next_batch);
         client.sync(settings).await?;
         Ok(())
@@ -158,6 +160,37 @@ impl ArcContext {
         ctx: Ctx<ArcContext>,
     ) -> Result<(), Error> {
         ctx.0.handle_room_message(event, room).await
+    }
+
+    async fn on_stripped_state_member(
+        room_member: StrippedRoomMemberEvent,
+        client: Client,
+        room: Room,
+    ) {
+        if room_member.state_key != client.user_id().unwrap() {
+            return;
+        }
+
+        tokio::spawn(async move {
+            log::info!("joining room {}", room.room_id());
+            let mut delay = 2;
+
+            while let Err(err) = room.join().await {
+                // retry join due to synapse sending invites, before the
+                // invited user can join for more information see
+                // https://github.com/matrix-org/synapse/issues/4345
+                log::warn!("failed to join room {}, retrying in {delay}s: {err}", room.room_id());
+
+                sleep(Duration::from_secs(delay)).await;
+                delay *= 2;
+
+                if delay > 300 {
+                    log::error!("failed to join room {}: {err}", room.room_id());
+                    break;
+                }
+            }
+            log::info!("joining room {}", room.room_id());
+        });
     }
 
     async fn handle_room_message(
