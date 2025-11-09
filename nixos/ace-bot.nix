@@ -272,7 +272,7 @@ in
             else
               clean_store=0
             fi
-            rm toplevel
+            rm --force toplevel
             nix --experimental-features nix-command build "${envToplevel}" --out-link toplevel
 
             # setup disk
