@@ -13,20 +13,24 @@ use matrix_sdk::{
     room::reply::{EnforceThread, Reply, ReplyError},
     ruma::{
         OwnedRoomId, OwnedUserId,
-        events::room::{member::StrippedRoomMemberEvent, message::{
-            MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent,
-            RoomMessageEventContentWithoutRelation,
-        }},
+        events::room::{
+            member::StrippedRoomMemberEvent,
+            message::{
+                MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent,
+                RoomMessageEventContentWithoutRelation,
+            },
+        },
     },
 };
 use regex::{Regex, RegexBuilder};
-use tokio::time::sleep;
 use std::{
     fmt::Display,
     ops::Deref,
     process::Output,
-    sync::{Arc, LazyLock}, time::Duration,
+    sync::{Arc, LazyLock},
+    time::Duration,
 };
+use tokio::time::sleep;
 
 #[derive(Debug, Clone)]
 struct ArcContext(Arc<Context>);
@@ -179,7 +183,10 @@ impl ArcContext {
                 // retry join due to synapse sending invites, before the
                 // invited user can join for more information see
                 // https://github.com/matrix-org/synapse/issues/4345
-                log::warn!("failed to join room {}, retrying in {delay}s: {err}", room.room_id());
+                log::warn!(
+                    "failed to join room {}, retrying in {delay}s: {err}",
+                    room.room_id()
+                );
 
                 sleep(Duration::from_secs(delay)).await;
                 delay *= 2;
