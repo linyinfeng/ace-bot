@@ -171,12 +171,12 @@ in
     };
     user.id = lib.mkOption {
       type =
-          with lib.types;
-          int
-          // {
-            check = v: int.check v && 1 <= v && v <= 1000;
-          };
-        default = 350;
+        with lib.types;
+        int
+        // {
+          check = v: int.check v && 1 <= v && v <= 1000;
+        };
+      default = 350;
     };
     privateUsers = {
       uidBase = lib.mkOption {

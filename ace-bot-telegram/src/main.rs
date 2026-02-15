@@ -5,8 +5,15 @@ use ace_bot::pastebin;
 use ace_bot::pastebin::curl_command;
 use clap::Parser;
 use futures::future::FutureExt;
+use magick_rust::MagickError;
+use magick_rust::MagickWand;
+use magick_rust::PixelWand;
+use magick_rust::magick_wand_genesis;
+use magick_rust::magick_wand_terminus;
 use regex::Regex;
 use regex::RegexBuilder;
+use std::cell::LazyCell;
+use std::collections::VecDeque;
 use std::fmt::Display;
 use std::ops::Deref;
 use std::process::Output;
@@ -14,7 +21,9 @@ use std::sync::{Arc, LazyLock};
 use teloxide::RequestError;
 use teloxide::types::InputFile;
 use teloxide::types::InputMedia;
+use teloxide::types::InputMediaAnimation;
 use teloxide::types::InputMediaDocument;
+use teloxide::types::InputMediaPhoto;
 use teloxide::types::{ParseMode, User};
 use teloxide::utils::markdown;
 use teloxide::{
@@ -23,6 +32,15 @@ use teloxide::{
     types::{MediaKind, MessageKind},
     utils,
 };
+
+thread_local! {
+    // cookie is not sendable across threads, so I simply use thread-local variable
+    pub static COOKIE: LazyCell<magic::Cookie<magic::cookie::Load>> = LazyCell::new(|| {
+        let magic_flags = magic::cookie::Flags::MIME;
+        let cookie = magic::Cookie::open(magic_flags).expect("failed to open magic cookie");
+        cookie.load(&magic::cookie::DatabasePaths::default()).expect("failed to load magic database")
+    });
+}
 
 #[derive(Debug, Clone)]
 struct ArcContext(Arc<Context>);
@@ -63,6 +81,8 @@ struct FullOptions {
 struct TgOptions {
     #[arg(long)]
     pub manager_chat_id: Option<i64>,
+    #[arg(long, default_value_t = 600.0)]
+    pub image_density: f64,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -71,34 +91,48 @@ pub enum Error {
     Ace(#[from] AceError),
     #[error("teloxide error: {0}")]
     Teloxide(#[from] RequestError),
+    #[error("magick error: {0}")]
+    Magick(#[from] MagickError),
 }
 
 static START_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    RegexBuilder::new("^(/start@[a-zA-Z_]+|/start)[[:space:]]*(.*)$")
+    RegexBuilder::new("^/start(@[a-zA-Z_]+)?[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
         .build()
         .unwrap()
 });
 static USER_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    RegexBuilder::new("^(/user@[a-zA-Z_]+|/user)[[:space:]]*(.*)$")
+    RegexBuilder::new("^/user(@[a-zA-Z_]+)?[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
         .build()
         .unwrap()
 });
 static ROOT_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    RegexBuilder::new("^(/root@[a-zA-Z_]+|/root)[[:space:]]*(.*)$")
+    RegexBuilder::new("^/root(@[a-zA-Z_]+)?[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
         .build()
         .unwrap()
 });
 static RESET_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    RegexBuilder::new("^(/reset@[a-zA-Z_]+|/reset)[[:space:]]*(.*)$")
+    RegexBuilder::new("^/reset(@[a-zA-Z_]+)?[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
         .build()
         .unwrap()
 });
 static NIX_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    RegexBuilder::new("^(/nix@[a-zA-Z_]+|/nix)[[:space:]]*(.*)$")
+    RegexBuilder::new("^/nix(@[a-zA-Z_]+)?[[:space:]]*(.*)$")
+        .dot_matches_new_line(true)
+        .build()
+        .unwrap()
+});
+static XELATEX_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    RegexBuilder::new("^/xelatex(@[a-zA-Z_]+)?[[:space:]]*(.*)$")
+        .dot_matches_new_line(true)
+        .build()
+        .unwrap()
+});
+static TYPST_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    RegexBuilder::new("^/typst(@[a-zA-Z_]+)?[[:space:]]*(.*)$")
         .dot_matches_new_line(true)
         .build()
         .unwrap()
@@ -106,25 +140,29 @@ static NIX_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    run().await
-}
-
-async fn run() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
+    magick_wand_genesis();
+
     log::info!("Starting ace-bot...");
     let options = FullOptions::parse();
     log::info!("Options = {options:#?}");
     let ctx = ArcContext(Arc::new(Context::new(options)?));
     let bot = Bot::from_env();
-    Dispatcher::builder(bot, Update::filter_message().endpoint(handle_update))
+    let handler = Update::filter_message()
+        .endpoint(handle_message)
+        .branch(Update::filter_inline_query().endpoint(handle_inline_query));
+    Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![ctx])
+        .enable_ctrlc_handler()
         .build()
         .dispatch()
         .await;
+
+    magick_wand_terminus();
     Ok(())
 }
 
-async fn handle_update(ctx: ArcContext, message: Message, bot: Bot) -> Result<(), ()> {
+async fn handle_message(ctx: ArcContext, message: Message, bot: Bot) -> Result<(), ()> {
     match &message.kind {
         MessageKind::Common(common_msg) => match &common_msg.media_kind {
             MediaKind::Text(text_media) => match &common_msg.from {
@@ -150,6 +188,12 @@ async fn handle_update(ctx: ArcContext, message: Message, bot: Bot) -> Result<()
                     if let Some(c) = NIX_COMMAND_PATTERN.captures(raw_text) {
                         mode = Mode::Nix;
                         command = c[2].to_string();
+                    } else if let Some(c) = XELATEX_COMMAND_PATTERN.captures(raw_text) {
+                        mode = Mode::Xelatex;
+                        command = c[2].to_string();
+                    } else if let Some(c) = TYPST_COMMAND_PATTERN.captures(raw_text) {
+                        mode = Mode::Typst;
+                        command = c[2].to_string();
                     } else if let Some(c) = ROOT_COMMAND_PATTERN.captures(raw_text) {
                         mode = Mode::Root;
                         command = preprocessing(&c[2]);
@@ -174,6 +218,15 @@ async fn handle_update(ctx: ArcContext, message: Message, bot: Bot) -> Result<()
         },
         _ => log::debug!("ignored update: {message:?}"),
     }
+    Ok(())
+}
+
+async fn handle_inline_query(
+    _ctx: ArcContext,
+    _inline_query: InlineQuery,
+    _bot: Bot,
+) -> Result<(), ()> {
+    // TODO working in progress
     Ok(())
 }
 
@@ -204,8 +257,9 @@ impl ArcContext {
             Err(e) => report_ace_error(&e, &message, &bot).await,
             Ok(output) => {
                 let output_message =
-                    OutputMessage::format(&user, Some(mode), &command, output).await;
-                self.handle_output(message, bot, output_message).await
+                    OutputMessage::format(self.clone(), &user, Some(mode), &command, output).await;
+                self.handle_output(message.chat.id, bot, output_message)
+                    .await
             }
         }
     }
@@ -214,24 +268,26 @@ impl ArcContext {
         match self.ace.reset().await {
             Err(e) => report_ace_error(&e, &message, &bot).await,
             Ok(output) => {
-                let output_message = OutputMessage::format(&user, None, "/reset", output).await;
-                self.handle_output(message, bot, output_message).await
+                let output_message =
+                    OutputMessage::format(self.clone(), &user, None, "/reset", output).await;
+                self.handle_output(message.chat.id, bot, output_message)
+                    .await
             }
         }
     }
 
     async fn handle_output(
         self,
-        message: Message,
+        chat: ChatId,
         bot: Bot,
         output: OutputMessage,
     ) -> ResponseResult<()> {
-        output.send(&bot, message.chat.id).await?;
         if let Some(id) = self.options.manager_chat_id
-            && ChatId(id) != message.chat.id
+            && ChatId(id) != chat
         {
-            output.send(&bot, ChatId(id)).await?;
+            output.clone().send(&bot, ChatId(id)).await?;
         };
+        output.send(&bot, chat).await?;
         Ok(())
     }
 
@@ -244,21 +300,41 @@ impl ArcContext {
     /reset - reset the whole environment
     ```"
             .to_string(),
-            documents: vec![],
+            photos: Default::default(),
+            animations: Default::default(),
+            documents: Default::default(),
         };
         help_message.send(&bot, message.chat.id).await?;
         Ok(())
     }
+
+    fn try_magick_wand(&self) -> Result<MagickWand, Error> {
+        let wand = MagickWand::new();
+        let density = self.options.image_density;
+        wand.set_resolution(density, density)?;
+        let mut background = PixelWand::new();
+        background.set_color("transparent")?; // TODO telegram does not support transparent photo
+        wand.set_background_color(&background)?;
+        Ok(wand)
+    }
+
+    fn magick_wand(&self) -> MagickWand {
+        self.try_magick_wand()
+            .unwrap_or_else(|e| panic!("failed to create MagickWand: {e}"))
+    }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct OutputMessage {
     message: String,
-    documents: Vec<InputMedia>,
+    photos: VecDeque<InputMediaPhoto>,
+    animations: VecDeque<InputMediaAnimation>,
+    documents: VecDeque<InputMediaDocument>,
 }
 
 impl OutputMessage {
     async fn format(
+        context: ArcContext,
         user: &User,
         mode: Option<Mode>,
         command: &str,
@@ -273,7 +349,9 @@ impl OutputMessage {
         const FILE_LIMIT: usize = 1024 * 1024; // 1 MiB
 
         let mut message = String::new();
-        let mut documents = Vec::new();
+        let mut animations = VecDeque::default();
+        let mut photos = VecDeque::default();
+        let mut documents = VecDeque::default();
         let client = reqwest::Client::new();
 
         message.push_str(&user);
@@ -284,35 +362,77 @@ impl OutputMessage {
         }
         message.push_str(":\n");
         if command.len() < PART_LIMIT {
-            message.push_str(&utils::markdown::code_block(command.trim()));
+            let language = match mode {
+                None => "text",
+                Some(Mode::Nix) => "nix",
+                Some(Mode::Xelatex) => "tex",
+                Some(Mode::Typst) => "typst",
+                Some(Mode::NonRoot) | Some(Mode::Root) => "bash",
+            };
+            message.push_str(&utils::markdown::code_block_with_lang(
+                command.trim(),
+                language,
+            ));
         } else {
-            documents.push(InputMedia::Document(InputMediaDocument::new(
+            documents.push_back(InputMediaDocument::new(
                 InputFile::memory(Vec::from(command.as_bytes())).file_name("script"),
-            )));
+            ));
         }
         message.push_str(&format!("{}", output.status));
         if !output.stdout.is_empty() {
-            message.push_str(&format!("\n{}", utils::markdown::escape("(stdout)")));
-            let mut inlined = false;
-            if let Ok(s) = String::from_utf8(output.stdout.clone())
-                && s.len() < PART_LIMIT
-            {
-                inlined = true;
-                message.push_str(&format!("\n{}", utils::markdown::code_block(&s)));
-            }
-            if !inlined {
-                if output.stdout.len() < FILE_LIMIT {
-                    message.push_str("\nattached");
-                    if let Ok(cmd) =
-                        pastebin::curl_command(&client, "stdout", output.stdout.clone()).await
-                    {
-                        message.push_str(&format!("\n{}", utils::markdown::code_block(&cmd)))
-                    }
-                    documents.push(InputMedia::Document(InputMediaDocument::new(
-                        InputFile::memory(output.stdout).file_name("stdout"),
-                    )));
+            // TODO use mime to support more file formats, e.g. video, audio, etc.
+            // let mime = COOKIE.with(|cookie| {
+            //     cookie
+            //         .buffer(&output.stdout)
+            //         .unwrap_or_else(|_| "application/octet-stream".to_string())
+            // });
+            let wand = context.magick_wand();
+            let image = if wand.read_image_blob(&output.stdout).is_ok() {
+                let frame_num = wand.get_number_images();
+                if frame_num > 1 {
+                    wand.write_images_blob("GIF").ok().map(|data| (data, true))
                 } else {
-                    message.push_str("\nfile size limit exceeded");
+                    // static image
+                    wand.write_image_blob("png").ok().map(|data| (data, false))
+                }
+            } else {
+                None
+            };
+            message.push_str(&format!("\n{}", utils::markdown::escape("(stdout)")));
+            if let Some((img_data, animated)) = image {
+                if animated {
+                    message.push_str("\nanimation attached");
+                    animations.push_back(InputMediaAnimation::new(
+                        InputFile::memory(img_data).file_name("stdout.gif"),
+                    ));
+                } else {
+                    message.push_str("\nimage attached");
+                    photos.push_back(InputMediaPhoto::new(
+                        InputFile::memory(img_data).file_name("stdout.png"),
+                    ));
+                }
+            } else {
+                let mut inlined = false;
+                if let Ok(s) = String::from_utf8(output.stdout.clone())
+                    && s.len() < PART_LIMIT
+                {
+                    inlined = true;
+                    message.push_str(&format!("\n{}", utils::markdown::code_block(&s)));
+                }
+                if !inlined {
+                    if output.stdout.len() < FILE_LIMIT {
+                        message.push_str("\nattached");
+                        if let Ok(cmd) =
+                            pastebin::curl_command(&client, "stdout", output.stdout.clone()).await
+                        {
+                            message.push_str(&format!("\n{}", utils::markdown::code_block(&cmd)))
+                        }
+                        documents.push_back(InputMediaDocument::new(
+                            InputFile::memory(output.stdout).file_name("stdout"),
+                        ));
+                    } else {
+                        message.push_str("\nfile size limit exceeded");
+                    }
                 }
             }
         }
@@ -332,26 +452,98 @@ impl OutputMessage {
                     if let Ok(cmd) = curl_command(&client, "stderr", output.stderr.clone()).await {
                         message.push_str(&format!("\n{}", utils::markdown::code_block(&cmd)))
                     }
-                    documents.push(InputMedia::Document(InputMediaDocument::new(
+                    documents.push_back(InputMediaDocument::new(
                         InputFile::memory(output.stderr).file_name("stderr"),
-                    )));
+                    ));
                 } else {
                     message.push_str("\nfile size limit exceeded");
                 }
             }
         }
 
-        OutputMessage { message, documents }
+        OutputMessage {
+            message,
+            animations,
+            photos,
+            documents,
+        }
     }
 
-    async fn send(&self, bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
-        let msg = bot
-            .send_message(chat_id, &self.message)
-            .parse_mode(ParseMode::MarkdownV2)
-            .await?;
+    async fn send(mut self, bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
+        let mut last_msg = None;
+
+        if !self.animations.is_empty() {
+            // animation can not be sent in media group
+            let first = self.animations.pop_front().unwrap();
+            last_msg = Some(
+                bot.send_animation(chat_id, first.media)
+                    .caption(self.message.clone())
+                    .parse_mode(ParseMode::MarkdownV2)
+                    .await?,
+            );
+        }
+        for a in self.animations {
+            let send = bot.send_animation(chat_id, a.media);
+            last_msg = Some(
+                (match last_msg {
+                    Some(msg) => send.reply_to_message_id(msg.id),
+                    None => send
+                        .caption(self.message.clone())
+                        .parse_mode(ParseMode::MarkdownV2),
+                })
+                .await?,
+            );
+        }
+
+        if !self.photos.is_empty() {
+            if last_msg.is_none() {
+                let first = self
+                    .photos
+                    .pop_front()
+                    .unwrap()
+                    .caption(self.message.clone())
+                    .parse_mode(ParseMode::MarkdownV2);
+                self.photos.push_front(first);
+            }
+            let media = self.photos.into_iter().map(InputMedia::Photo);
+            let send = bot.send_media_group(chat_id, media);
+            last_msg = Some(
+                (match last_msg {
+                    Some(msg) => send.reply_to_message_id(msg.id),
+                    None => send,
+                })
+                .await?
+                .into_iter()
+                .next()
+                .expect("empty media group response"),
+            );
+        }
         if !self.documents.is_empty() {
-            bot.send_media_group(chat_id, self.documents.iter().cloned())
-                .reply_to_message_id(msg.id)
+            if last_msg.is_none() {
+                let first = self
+                    .documents
+                    .pop_front()
+                    .unwrap()
+                    .caption(self.message.clone())
+                    .parse_mode(ParseMode::MarkdownV2);
+                self.documents.push_front(first);
+            }
+            let media = self.documents.into_iter().map(InputMedia::Document);
+            let send = bot.send_media_group(chat_id, media);
+            last_msg = Some(
+                (match last_msg {
+                    Some(msg) => send.reply_to_message_id(msg.id),
+                    None => send,
+                })
+                .await?
+                .into_iter()
+                .next()
+                .expect("empty media group response"),
+            );
+        }
+        if last_msg.is_none() {
+            bot.send_message(chat_id, self.message)
+                .parse_mode(ParseMode::MarkdownV2)
                 .await?;
         }
         Ok(())

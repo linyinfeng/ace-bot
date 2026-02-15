@@ -16,3 +16,5 @@ log.workspace = true
 tracing-subscriber.workspace = true
 once_cell.workspace = true
 reqwest.workspace = true
+magic.workspace = true
+magick_rust.workspace = true

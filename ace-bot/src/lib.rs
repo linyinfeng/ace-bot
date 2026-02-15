@@ -4,10 +4,10 @@ use users::{Group, User, get_group_by_name, get_user_by_name};
 pub mod pastebin;
 
 use mktemp::Temp;
-use std::fmt;
 use std::os::unix::fs::chown;
 use std::path::{Path, PathBuf, StripPrefixError};
 use std::process::{Output, Stdio};
+use std::{fmt, io};
 use tokio::fs::{File, OpenOptions, create_dir_all};
 use tokio::io::AsyncWriteExt;
 
@@ -46,6 +46,8 @@ pub enum Mode {
     NonRoot,
     Root,
     Nix,
+    Xelatex,
+    Typst,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -79,6 +81,8 @@ impl AceBot {
         match mode {
             Mode::NonRoot | Mode::Root => self.run_bash(mode, text).await,
             Mode::Nix => self.run_nix(text).await,
+            Mode::Xelatex => self.run_xelatex(text).await,
+            Mode::Typst => self.run_typst(text).await,
         }
     }
 
@@ -107,7 +111,7 @@ impl AceBot {
             Mode::Root => {
                 command.args(["--working-directory=/root"]);
             }
-            Mode::Nix => return Err(AceError::InvalidMode(mode)),
+            _ => return Err(AceError::InvalidMode(mode)),
         }
         command
             .arg("--")
@@ -125,38 +129,131 @@ impl AceBot {
         Ok(output)
     }
 
-    pub async fn run_nix(&self, expr: &str) -> Result<Output, AceError> {
-        // prepare file
-        let host_dir = self.options.user_host_home.join(".ace-bot").join("nix");
-        let guest_dir = self.options.user_guest_home.join(".ace-bot").join("nix");
+    pub async fn run_in_temp_dir<Fn, F>(&self, task: Fn) -> Result<Output, AceError>
+    where
+        Fn: FnOnce(Temp, PathBuf) -> F,
+        F: Future<Output = Result<Output, AceError>>,
+    {
+        let host_dir = self.options.user_host_home.join(".ace-bot").join("tasks");
+        let guest_dir = self.options.user_guest_home.join(".ace-bot").join("tasks");
         create_dir_all(&host_dir).await?;
-        let temp = Temp::new_file_in(&host_dir)?;
-        let mut file = OpenOptions::new().write(true).open(&temp).await?;
-        let content = format!("let pkgs = import <nixpkgs> {{ }}; in {expr}");
-        file.write_all(content.as_bytes()).await?; // utf-8
-        file.flush().await?;
+        let host_temp = Temp::new_dir_in(&host_dir)?;
+        let guest_temp = guest_dir.join(
+            host_temp
+                .strip_prefix(&host_dir)
+                .map_err(AceError::CanNotStripTempFilePath)?,
+        );
+        self.ensure_owner(self.options.user_host_home.join(".ace-bot"))?;
+        self.ensure_owner(&host_dir)?;
+        self.ensure_owner(&host_temp)?;
+        task(host_temp, guest_temp).await
+    }
 
-        // ensure permissions
-        let ensure_owner = |p: &Path| {
-            chown(
-                p,
-                Some(self.user_mode_user.uid()),
-                Some(self.user_mode_group.gid()),
-            )
-        };
-        ensure_owner(&self.options.user_host_home.join(".ace-bot"))?;
-        ensure_owner(&host_dir)?;
-        ensure_owner(&temp)?;
+    pub async fn run_nix(&self, expr: &str) -> Result<Output, AceError> {
+        self.run_in_temp_dir(async |host_temp, guest_temp| {
+            let (mut file, _host_path, guest_path) = self
+                .create_file(&host_temp, &guest_temp, "expr.nix")
+                .await?;
+            let content = format!("let pkgs = import <nixpkgs> {{ }}; in {expr}");
+            file.write_all(content.as_bytes()).await?; // utf-8
+            file.flush().await?;
+            let eval_command = format!("nix eval --file {}", guest_path.display());
+            self.run_bash(Mode::NonRoot, &eval_command).await
+        })
+        .await
+    }
 
-        // evaluate
-        let relative_path = temp
-            .strip_prefix(&host_dir)
-            .map_err(AceError::CanNotStripTempFilePath)?;
-        let guest_path = guest_dir.join(relative_path);
-        let eval_command = format!("nix eval --file {}", guest_path.display());
-        let output = self.run_bash(Mode::NonRoot, &eval_command).await?;
-        drop(temp); // temp finally drops here or on error
-        Ok(output)
+    pub async fn run_xelatex(&self, expr: &str) -> Result<Output, AceError> {
+        self.run_in_temp_dir(async |host_temp, guest_temp| {
+            let (mut file, _host_path, _guest_path) = self
+                .create_file(&host_temp, &guest_temp, "main.tex")
+                .await?;
+            let content = format!(
+                r#"\documentclass[dvisvgm, border=5mm]{{standalone}}
+
+\special{{background White}}
+
+\begin{{document}}
+
+{expr}
+
+\end{{document}}
+"#
+            );
+            file.write_all(content.as_bytes()).await?; // utf-8
+            file.flush().await?;
+            let eval_command = format!(
+                r#"cd {}
+echo "===== main.tex =====" >&2
+cat main.tex >&2
+echo "===== xelatex --no-pef main.tex =====" >&2
+xelatex --no-pdf main.tex >&2
+echo "===== dvisvgm --no-fonts --bbox=papersize main.xdv =====" >&2
+dvisvgm --no-fonts --bbox=papersize main.xdv >&2
+cat main.svg
+"#,
+                guest_temp.display()
+            );
+            self.run_bash(Mode::NonRoot, &eval_command).await
+        })
+        .await
+    }
+
+    pub async fn run_typst(&self, expr: &str) -> Result<Output, AceError> {
+        self.run_in_temp_dir(async |host_temp, guest_temp| {
+            let (mut file, _host_path, _guest_path) = self
+                .create_file(&host_temp, &guest_temp, "main.typ")
+                .await?;
+            let content = format!(
+                r#"#set page(
+  width: auto,
+  height: auto,
+  margin: 5mm,
+)
+{expr}
+"#
+            );
+            file.write_all(content.as_bytes()).await?; // utf-8
+            file.flush().await?;
+            let eval_command = format!(
+                r#"cd {}
+echo "===== main.typ =====" >&2
+cat main.typ >&2
+echo "===== typst compile --format=svg main.typ =====" >&2
+typst compile --format=svg main.typ >&2
+cat main.svg
+"#,
+                guest_temp.display()
+            );
+            self.run_bash(Mode::NonRoot, &eval_command).await
+        })
+        .await
+    }
+
+    pub fn ensure_owner<P: AsRef<Path>>(&self, path: P) -> Result<(), io::Error> {
+        let p = path.as_ref();
+        chown(
+            p,
+            Some(self.user_mode_user.uid()),
+            Some(self.user_mode_group.gid()),
+        )
+    }
+
+    pub async fn create_file(
+        &self,
+        host_temp: &Temp,
+        guest_temp: &Path,
+        name: &str,
+    ) -> Result<(File, PathBuf, PathBuf), io::Error> {
+        let host_path = host_temp.join(name);
+        let guest_path = guest_temp.join(name);
+        let file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&host_path)
+            .await?;
+        self.ensure_owner(&host_path)?;
+        Ok((file, host_path, guest_path))
     }
 
     pub async fn reset(&self) -> Result<Output, AceError> {
@@ -175,6 +272,8 @@ impl fmt::Display for Mode {
             Mode::Root => write!(f, "root"),
             Mode::NonRoot => write!(f, "non-root"),
             Mode::Nix => write!(f, "nix"),
+            Mode::Xelatex => write!(f, "xelatex"),
+            Mode::Typst => write!(f, "typst"),
         }
     }
 }

@@ -20,5 +20,10 @@ pretty_env_logger = "*"
 once_cell = "*"
 reqwest = { version = "*", features = ["multipart"] }
 
+magick_rust = "*"
+magic = "*"
+image = "*"
+webp = "*"
+
 teloxide = { version = "*", features = [ "macros", "auto-send" ] }
 matrix-sdk = ">=0.13.0"

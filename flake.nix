@@ -23,11 +23,8 @@
     inputs@{ flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } (
       {
-        config,
-        self,
         inputs,
         lib,
-        getSystem,
         ...
       }:
       {
@@ -57,12 +54,16 @@
               inherit (craneLib.crateNameFromCargoToml { src = ./ace-bot; }) pname version;
               inherit src;
               nativeBuildInputs = with pkgs; [
+                clang
                 pkg-config
               ];
               buildInputs = with pkgs; [
                 openssl
                 sqlite
+                file
+                imagemagick
               ];
+              env.LIBCLANG_PATH = "${lib.getLib pkgs.libclang}/lib";
             };
             cargoArtifacts = craneLib.buildDepsOnly bareCommonArgs;
             commonArgs = bareCommonArgs // {
@@ -101,7 +102,12 @@
               };
             };
             devShells.default = pkgs.mkShell {
-              inputsFrom = lib.attrValues self'.checks;
+              inputsFrom = [
+                self'.packages.ace-bot
+              ];
+              env = {
+                inherit (self'.packages.ace-bot) LIBCLANG_PATH;
+              };
               packages = with pkgs; [
                 rustup
                 rust-analyzer
