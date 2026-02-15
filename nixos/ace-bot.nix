@@ -32,7 +32,7 @@ let
   envConfiguration = nixosSystem {
     modules = [
       (
-        { modulesPath, ... }:
+        { ... }:
         {
           # container settings
           boot.isContainer = true;
@@ -45,7 +45,6 @@ let
       (
         {
           config,
-          pkgs,
           ...
         }:
         {
@@ -69,7 +68,7 @@ let
         }
       )
       (
-        { pkgs, ... }:
+        { ... }:
         {
           # extra nix settings
           nix.settings = {
@@ -108,7 +107,7 @@ let
     [Exec]
     Boot=no
     Parameters="${envInit}"
-    PrivateUsers=${toString cfg.privateUsers.uidBase}:${toString cfg.privateUsers.gidBase}
+    PrivateUsers=pick
     LinkJournal=host
 
     [Files]
@@ -169,6 +168,15 @@ in
     rustLog = lib.mkOption {
       type = lib.types.str;
       default = "info";
+    };
+    user.id = lib.mkOption {
+      type =
+          with lib.types;
+          int
+          // {
+            check = v: int.check v && 1 <= v && v <= 1000;
+          };
+        default = 350;
     };
     privateUsers = {
       uidBase = lib.mkOption {
@@ -236,8 +244,9 @@ in
           home = "/var/lib/ace-bot/mount/disk/home";
           shell = cfg.shell;
           group = "ace-bot";
+          uid = cfg.user.id;
         };
-        users.groups.ace-bot = { };
+        users.groups.ace-bot.gid = cfg.user.id;
         systemd.slices.acebot = {
           description = "ACE Bot Remote Codes";
           sliceConfig = {
