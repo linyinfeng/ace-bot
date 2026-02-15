@@ -186,7 +186,7 @@ impl AceBot {
                 r#"cd {}
 echo "===== main.tex =====" >&2
 cat main.tex >&2
-echo "===== xelatex --no-pef main.tex =====" >&2
+echo "===== xelatex --no-pdf main.tex =====" >&2
 xelatex --no-pdf main.tex >&2
 echo "===== dvisvgm --no-fonts --bbox=papersize main.xdv =====" >&2
 dvisvgm --no-fonts --bbox=papersize main.xdv >&2
