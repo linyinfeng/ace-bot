@@ -103,7 +103,19 @@ let
       '';
   envInitName = if envConfiguration.config.boot.initrd.systemd.enable then "prepare-root" else "init";
   envInit = "${envToplevel}/${envInitName}";
-  nspawnSettingsBase = pkgs.writeText "ace-bot.nspawn.base" ''
+  storeFs = pkgs.runCommand "store.erofs" {
+    nativeBuildInputs = with pkgs; [
+      gnutar
+      erofs-utils
+    ];
+  } ''
+    tar --directory=/nix/store \
+      --create --file=store.tar \
+      --files-from="${envToplevelClosureInfo}/store-paths" \
+      --verbose
+      mkfs.erofs --tar "$out" store.tar -d 3
+  '';
+  nspawnSettings = pkgs.writeText "ace-bot.nspawn" ''
     [Exec]
     Boot=no
     Parameters="${envInit}"
@@ -114,18 +126,10 @@ let
     PrivateUsersOwnership=map
     BindUser=ace-bot
     BindReadOnly=${envToplevelClosureInfo}/registration:/nix/initial-registration:idmap
+    BindReadOnly=${storeFs}:/:idmap
+    Overlay=+/nix/store::/nix/store
 
     [Network]
-  '';
-  nspawnSettings = pkgs.runCommand "ace-bot.nspawn" { } ''
-    touch "$out"
-    cp "${nspawnSettingsBase}" "$out"
-    echo "[Files]" >>"$out"
-
-    IFS=$'\n'
-    for store_path in $(cat "${envToplevelClosureInfo}/store-paths"); do
-      echo "BindReadOnly=$store_path:$store_path:idmap" >>"$out"
-    done
   '';
   commonBotOptions = ''
     --shell="${lib.getExe cfg.shell}" \
@@ -351,6 +355,7 @@ in
             inherit envToplevelState;
             inherit envToplevelClosureInfo;
             inherit nspawnSettings;
+            inherit storeFs;
           };
         };
       }
