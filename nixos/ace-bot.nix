@@ -103,18 +103,21 @@ let
       '';
   envInitName = if envConfiguration.config.boot.initrd.systemd.enable then "prepare-root" else "init";
   envInit = "${envToplevel}/${envInitName}";
-  storeFs = pkgs.runCommand "store.erofs" {
-    nativeBuildInputs = with pkgs; [
-      gnutar
-      erofs-utils
-    ];
-  } ''
-    tar --directory=/nix/store \
-      --create --file=store.tar \
-      --files-from="${envToplevelClosureInfo}/store-paths" \
-      --verbose
-      mkfs.erofs --tar "$out" store.tar -d 3
-  '';
+  storeFs =
+    pkgs.runCommand "store.erofs"
+      {
+        nativeBuildInputs = with pkgs; [
+          gnutar
+          erofs-utils
+        ];
+      }
+      ''
+        tar --directory=/nix/store \
+          --create --file=store.tar \
+          --files-from="${envToplevelClosureInfo}/store-paths" \
+          --verbose
+          mkfs.erofs --tar "$out" store.tar -d 3
+      '';
   nspawnSettings = pkgs.writeText "ace-bot.nspawn" ''
     [Exec]
     Boot=no
