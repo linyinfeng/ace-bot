@@ -116,7 +116,7 @@ let
           --create --file=store.tar \
           --files-from="${envToplevelClosureInfo}/store-paths" \
           --verbose
-          mkfs.erofs --tar "$out" store.tar -d 3
+        mkfs.erofs --tar "$out" store.tar -d 3
       '';
   nspawnSettings = pkgs.writeText "ace-bot.nspawn" ''
     [Exec]
