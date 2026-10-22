@@ -349,14 +349,14 @@ impl OutputMessage {
                 && s.len() < PART_LIMIT
             {
                 inlined = true;
-                message.push_str(&format!("\n{}", &s));
+                message.push_str(&format!("\n{}", s));
             }
             if !inlined {
                 if output.stdout.len() < FILE_LIMIT {
                     if let Ok(cmd) =
                         pastebin::curl_command(&client, "stdout", output.stdout.clone()).await
                     {
-                        message.push_str(&format!("\n{}", &cmd))
+                        message.push_str(&format!("\n{}", cmd))
                     }
                 } else {
                     message.push_str("\nfile size limit exceeded");
@@ -371,12 +371,12 @@ impl OutputMessage {
                 && s.len() < PART_LIMIT
             {
                 inlined = true;
-                message.push_str(&format!("\n{}", &s));
+                message.push_str(&format!("\n{}", s));
             }
             if !inlined {
                 if output.stderr.len() < FILE_LIMIT {
                     if let Ok(cmd) = curl_command(&client, "stderr", output.stderr.clone()).await {
-                        message.push_str(&format!("\n{}", &cmd))
+                        message.push_str(&format!("\n{}", cmd))
                     }
                 } else {
                     message.push_str("\nfile size limit exceeded");
