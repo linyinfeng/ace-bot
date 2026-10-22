@@ -1,3 +1,6 @@
+// reqwest 0.13 nests the future types enough that auto-trait solving overflows.
+#![recursion_limit = "256"]
+
 // reference: https://github.com/matrix-org/matrix-rust-sdk/tree/main/examples/command_bot
 
 use ace_bot::{
@@ -16,7 +19,7 @@ use matrix_sdk::{
         events::room::{
             member::StrippedRoomMemberEvent,
             message::{
-                MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent,
+                AddMentions, MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent,
                 RoomMessageEventContentWithoutRelation,
             },
         },
@@ -419,6 +422,7 @@ pub async fn reply(
     let reply = Reply {
         event_id: event.event_id.clone(),
         enforce_thread: EnforceThread::MaybeThreaded,
+        add_mentions: AddMentions::Yes,
     };
     let reply_event = room.make_reply_event(message, reply).await?;
     room.send(reply_event).await?;
