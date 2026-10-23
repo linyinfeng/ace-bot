@@ -8,7 +8,7 @@ pub enum PastebinError {
     #[error("reqwest error: {0}")]
     Reqwest(#[from] reqwest::Error),
     #[error("failed response: {0:?}")]
-    FailedResponse(Response),
+    FailedResponse(Box<Response>),
 }
 
 pub async fn url(
@@ -25,7 +25,7 @@ pub async fn url(
     if response.status() == StatusCode::OK {
         Ok(response.text().await?.trim().to_string())
     } else {
-        Err(PastebinError::FailedResponse(response))
+        Err(PastebinError::FailedResponse(Box::new(response)))
     }
 }
 
